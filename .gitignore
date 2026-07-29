@@ -212,4 +212,4 @@ test*.db
 test*.json
 
 # Esecutabili
-python-*.exe
+python-*.exegithub_update.sh
