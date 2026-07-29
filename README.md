@@ -25,7 +25,8 @@ Part of the **HOPE Ecosystem (Human Open Payment Ecosystem)**, PAX Wallet promot
 - 💸 Free and open money
 
 
-<img src="./img/mappa-generale.png" alt="Scenario" width="600">
+<img src="./img/mappa-generale.png" alt="Scenario" width="800">
+
 ---
 
 ## 🔧 Technical Specifications
@@ -130,7 +131,7 @@ SA4KQ7M9X2Y5N8P3R6T1V4W7Z0B2C5D8E1F4G7H0J3K6L9M2N5P8Q1R4T7V
 123456-654321-987654-112233-445566-778899-123456-654321
 ```
 
-    ⚠️ All values shown above are examples only and cannot access any real wallet.
+###    ⚠️ All values shown above are examples only and cannot access any real wallet.
 
 Transactions
 Feature Status
@@ -418,4 +419,5 @@ https://img.shields.io/github/issues/argo79/pax-wallet
 https://img.shields.io/github/last-commit/argo79/pax-wallet
 
 <h3>🙏 Acknowledgments</h3><p>This project would not have been possible without the work of:</p><ul> <li> <strong>Reticulum Network Stack</strong> — The amazing decentralized network stack that makes all of this possible.<br> <a href="https://reticulum.network/">🌐 reticulum.network</a> · <a href="https://github.com/markqvist/Reticulum">📦 GitHub</a> </li> <li> <strong>Mark Qvist</strong> — For creating Reticulum and the entire ecosystem around it. 🙌 </li> <li> <strong>XRPL Foundation</strong> — For the XRP Ledger protocol and its capabilities.<br> <a href="https://xrpl.org/">🌐 xrpl.org</a> · <a href="https://github.com/XRPLF">📦 GitHub</a> </li> <li> <strong>Stellar Development Foundation</strong> — For the Stellar network and its ecosystem.<br> <a href="https://stellar.org/">🌐 stellar.org</a> · <a href="https://github.com/stellar">📦 GitHub</a> </li> <li> <strong>The Reticulum Community</strong> — For support, testing, and ideas that shaped this tool. </li> <li> <strong>The HOPE Community</strong> — For the vision of a human and decentralized economy. </li> </ul><p align="center"> <i>❤️ Thank you to everyone who contributes to the project, reports bugs, and suggests improvements!</i> </p><h3>📧 Contact</h3><p> <strong>Email:</strong> arg0netds@gmail.com<br> <strong>GitHub:</strong> <a href="https://github.com/argo79/pax-wallet">https://github.com/argo79/pax-wallet</a><br> <strong>RNS Identity:</strong> <code>877c43067be84c0442a6c4d547332f33</code> </p><p align="center"> <i>📡 Reach me via Reticulum using the identity hash above!</i> </p><h3>🐛 Known Issues</h3> <ul> <li>Reticulum gateway in propagation mode (-p) can consume significant resources. Use without -p for lightweight usage.</li> <li>Initial peer discovery may take a few seconds.</li> <li>On slow networks, info requests may timeout (configurable).</li> </ul><h3>🔜 Roadmap</h3><ul> <li><strong>v1.0.0</strong> <ul> <li>Full XRP/XLM support</li> <li>Trustlines and custom tokens</li> <li>Stable Reticulum gateway</li> <li>Peer discovery and metrics</li> </ul> </li> <li><strong>v1.1.0</strong> <ul> <li>Multi-language (IT, EN, RU, CN)</li> <li>CSV/JSON peer export</li> <li>Automatic wallet backup</li> </ul> </li> <li><strong>v1.2.0</strong> <ul> <li>Native mobile client (Android/iOS)</li> <li>Multi-signature support</li> <li>Cold storage signing</li> </ul> </li> <li><strong>v2.0.0</strong> <ul> <li>Nomad Network integration</li> <li>XRP smart contracts (hooks)</li> <li>Full HOPE Ecosystem</li> </ul> </li> </ul><h3>🕊️ Philosophy</h3><blockquote> <p><em>"Money is freedom. Freedom is human. Human is hope."</em></p> </blockquote><p> <strong>PAX Wallet</strong> is not just a wallet — it's a statement. </p><p>We believe in:</p> <ul> <li><strong>Decentralization</strong> — No single point of failure, no central authority</li> <li><strong>Privacy</strong> — Your transactions are your business</li> <li><strong>Freedom</strong> — Permissionless, borderless, open</li> <li><strong>Humanity</strong> — Technology serving humans, not the other way around</li> </ul><p align="center"> <i><strong>HOPE</strong> is the vision. <strong>PAX</strong> is the tool.</i> </p><p align="center"> <i> 🌍 In a divided world, HOPE is the dream of a better future. PAX is the tool to build it. </i> </p><p align="center"> <strong>PAX Wallet - Peace Through Free Money</strong><br> <strong>HOPE Ecosystem - Human Open Payment Ecosystem</strong> </p><p align="center"> <a href="https://github.com/argo79/pax-wallet">🏠 Repository</a> · <a href="https://github.com/argo79/pax-wallet/issues">🐛 Report Bug</a> · <a href="https://github.com/argo79/pax-wallet/discussions">💬 Discussions</a> </p> ```
+
 
