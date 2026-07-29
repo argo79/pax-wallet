@@ -145,19 +145,21 @@ Feature Status
 - Trustlines  ✅
 - Transaction Memos   ✅
 - Reticulum Integration
-Feature Status
-Gateway Mode    ✅
-Peer Discovery  ✅
-Gateway Metrics ✅
-Mesh Routing    ✅
-Offline Store & Forward ✅
+- Feature Status
+- Gateway Mode    ✅
+- Peer Discovery  ✅
+- Gateway Metrics ✅
+- Mesh Routing    ✅
+- Offline Store & Forward ✅
+
 Security
-Feature Status
-Encrypted Wallet Storage    ✅
-Backup & Restore    ✅
-Mnemonic Recovery   ✅
-Multi-Signature Wallets 🚧 Planned
-Cold Storage Signing    🚧 Planned
+
+- Feature Status
+- Encrypted Wallet Storage    ✅
+- Backup & Restore    ✅
+- Mnemonic Recovery   ✅
+- Multi-Signature Wallets 🚧 Planned
+-- Cold Storage Signing    🚧 Planned
 
 ## 🏗️ Architecture
 
