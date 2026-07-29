@@ -192,19 +192,21 @@ Feature Status
                     +----------------+
 ```
 
-📦 Installation
-From Release (Recommended)
-```bash
+# 📦 Installation
 
-# Linux
+From Release (Recommended)
+
+## Linux
+```bash
 wget https://github.com/argo79/pax-wallet/releases/download/v0.9.0b/wallet
 chmod +x wallet
 ./wallet interactive
 ```
 
-# Windows
-# Download wallet.exe and run
+## Windows
 ```test
+Download wallet.exe and run
+
 wallet.exe interactive
 ```
 
