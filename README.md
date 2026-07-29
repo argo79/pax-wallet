@@ -144,8 +144,11 @@ Feature Status
 - Token Transfers ✅
 - Trustlines  ✅
 - Transaction Memos   ✅
-- Reticulum Integration
-- Feature Status
+
+### Reticulum Integration
+
+Feature Status
+
 - Gateway Mode    ✅
 - Peer Discovery  ✅
 - Gateway Metrics ✅
