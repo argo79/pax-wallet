@@ -152,14 +152,15 @@ Feature Status
 - Mesh Routing    ✅
 - Offline Store & Forward ✅
 
-Security
+### Security
 
-- Feature Status
+Feature Status
+
 - Encrypted Wallet Storage    ✅
 - Backup & Restore    ✅
 - Mnemonic Recovery   ✅
 - Multi-Signature Wallets 🚧 Planned
--- Cold Storage Signing    🚧 Planned
+- Cold Storage Signing    🚧 Planned
 
 ## 🏗️ Architecture
 
