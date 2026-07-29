@@ -1,0 +1,24 @@
+{
+    "gateway": {
+        "name": "gateway",
+        "announce_interval": 60,
+        "internet": "on",
+        "ledger_check_interval": 3600,
+        "ledger_timeout_seconds": 5,
+        "query_interval": 3600,
+        "max_peers_to_query": 10,
+        "max_hops_for_query": 3,
+        "query_timeout_seconds": 60,
+        "discover_since_seconds": 86400
+    },
+    "wallet": {
+        "name": "wallet",
+        "announce_interval": 60,
+        "discover_since_seconds": 86400
+    },
+    "sync": {
+        "peers_per_cycle": 2,
+        "timeout_seconds": 5
+    },
+    "background": false
+}

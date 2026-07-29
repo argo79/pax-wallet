@@ -1,0 +1,215 @@
+# ============================================================
+# PAX WALLET / HOPE ECOSYSTEM - .gitignore
+# ============================================================
+
+# ============================================================
+# 1. AMBIENTE PYTHON
+# ============================================================
+venv/
+env/
+.env/
+ENV/
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pyc
+*.pyz
+*.pyi
+
+# ============================================================
+# 2. BUILD E DISTRIBUZIONE
+# ============================================================
+build/
+dist/
+build_windows/
+dist_windows/
+portable/
+*.spec
+*.egg-info/
+*.egg
+.eggs/
+*.whl
+
+# ============================================================
+# 3. FILE TEMPORANEI E DI CACHE
+# ============================================================
+*.log
+*.tmp
+*.temp
+*.bak
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+.cache/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ============================================================
+# 4. DATABASE E FILE DI DATI (esclusi i template)
+# ============================================================
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+*.rid
+*.running
+
+# ============================================================
+# 5. FILE DI CONFIGURAZIONE PERSONALI (NON includere)
+# ============================================================
+*.env
+*.secret
+*.key
+*.pem
+*.crt
+*.key
+*_identity.rid
+
+# ============================================================
+# 6. WALLET E DATI SENSIBILI
+# ============================================================
+wallets/
+*.wallet
+*.seed
+*.mnemonic
+active_wallet.txt
+
+# ============================================================
+# 7. FILE DI BUILD RUST
+# ============================================================
+target/
+Cargo.lock
+*.so
+*.dll
+*.dylib
+*.a
+*.o
+*.rlib
+*.rmeta
+*.d
+*.exe
+
+# ============================================================
+# 8. NODE.JS
+# ============================================================
+node_modules/
+package-lock.json
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ============================================================
+# 9. IDE E EDITOR
+# ============================================================
+.vscode/
+.idea/
+*.iml
+*.iws
+*.ipr
+.venv/
+.virtualenv/
+*.code-workspace
+.vagrant/
+
+# ============================================================
+# 10. FILE DI TEST
+# ============================================================
+test_*.py
+test_*.pyc
+test*.db
+test*.json
+test-*.log
+test_results/
+coverage/
+*.coverage
+htmlcov/
+
+# ============================================================
+# 11. FILE DI SISTEMA E ARCHIVI
+# ============================================================
+*.zip
+*.tar.gz
+*.tgz
+*.rar
+*.7z
+*.iso
+*.exe
+*.msi
+*.deb
+*.rpm
+
+# ============================================================
+# 12. FILE DI PROGETTI TERZI
+# ============================================================
+mingw64/
+android-ndk-*.zip
+mingw-*.pkg.tar.zst
+*.pkg.tar.zst
+
+# ============================================================
+# 13. FILE DI BACKUP
+# ============================================================
+backup_tests/
+*.bak
+*.backup
+*.old
+*.orig
+
+# ============================================================
+# 14. DOCUMENTAZIONE GENERATA
+# ============================================================
+docs/_build/
+docs/build/
+site/
+*.html
+*.pdf
+
+# ============================================================
+# 15. FILE DI LOG DI RETICULUM
+# ============================================================
+gateway.running
+gateway*.log
+rns*.log
+lxmd*.log
+
+# ============================================================
+# 16. FILE CHE NON DEVONO FINIRE SU GIT
+# ============================================================
+# Librerie compilate
+wallet_core.so
+wallet_core.dll
+
+# Database utente
+wallet_cli.db
+wallet_core.db
+gateway_peers.db
+gateway_cache.db
+announce_cache.db
+
+# File di identità (sensibili)
+gateway_identity.rid
+annuncio_identity.rid
+reticulum_identity.rid
+
+# Dati wallet utente
+wallets/
+active_wallet.txt
+
+# File di configurazione con dati locali (ma annuncio_config.json SÌ!)
+mew_issuer_info.json
+
+# File di test
+test_api.py
+test_*.py
+test*.db
+test*.json
+
+# Esecutabili
+python-*.exe
