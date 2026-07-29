@@ -16,7 +16,7 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-BRANCH="main"
+BRANCH="master"
 
 # ============================================================
 # 📖 LEGGI VERSIONE DA wallet_cli.py
