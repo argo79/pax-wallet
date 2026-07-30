@@ -526,13 +526,15 @@ If you are an individual or a non-profit organization, you are free to use this 
 For commercial entities, the GPLv3 terms apply in full.
 
 ---
-
 <p align="center">
-  <blockquote style="border-left: 4px solid #FFD700; padding-left: 16px; color: #FFD700; font-style: italic;">
+  <span style="color: #FFD700; font-style: italic; font-size: 1.1em;">
     "Freedom is not free. It is shared."
-  </blockquote>
+  </span>
+  <br>
+  <span style="color: #FFD700; font-size: 0.8em; opacity: 0.7;">
+    — PAX Wallet
+  </span>
 </p>
-
 ---
 
 This license ensures that PAX Wallet and its derivatives remain **free, open, and accessible** to everyone — not just those who can pay for it.
