@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="./img/logo.png" alt="PAX Wallet Logo" width="400">
+</p>
+
 # 🕊️ PAX Wallet
 
 > **Payment Autonomous eXchange — Peace Through Free Money**
@@ -12,10 +16,6 @@
 
 ## 📖 Overview
 
-<p align="center">
-  <img src="./img/logo.png" alt="PAX Wallet Logo" width="400">
-</p>
-
 **PAX Wallet** is a free, decentralized, human-centric wallet designed for peer-to-peer payments over the **Reticulum** mesh network.
 
 🕊️ **PAX** means **Peace** in Latin and stands for **P**ayment **A**utonomous e**X**change.
@@ -27,7 +27,6 @@ Part of the **HOPE Ecosystem (Human Open Payment Ecosystem)**, PAX Wallet promot
 - 🤝 Peer-to-peer networking
 - 🕊️ Human sovereignty
 - 💸 Free and open money
-
 
 ---
 
