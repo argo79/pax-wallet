@@ -24,8 +24,7 @@ Part of the **HOPE Ecosystem (Human Open Payment Ecosystem)**, PAX Wallet promot
 - 🕊️ Human sovereignty
 - 💸 Free and open money
 
-
-<img src="./img/mappa-generale.png" alt="Scenario" width="800">
+<img src="./img/logo.png" alt="logo" width="400">
 
 ---
 
@@ -65,6 +64,8 @@ Part of the **HOPE Ecosystem (Human Open Payment Ecosystem)**, PAX Wallet promot
 | **AES-256** | Optional encrypted wallet storage |
 
 ### Network Security
+
+<img src="./img/mappa-generale.png" alt="Scenario" width="800">
 
 Reticulum provides:
 
@@ -618,3 +619,22 @@ A wallet that is:
   <strong>HOPE Ecosystem — Human Open Payment Ecosystem</strong>
 </p>
 
+
+
+Sì. Posso generare immagini da una descrizione e anche creare grafiche per il tuo progetto, per esempio:
+
+    🕊️ Logo PAX Wallet / HOPE Ecosystem
+
+    🌐 diagramma architetturale del wallet
+
+    📡 illustrazione della rete Reticulum
+
+    💧 icone XRP / ⭐ XLM integrate nel branding
+
+    🖥️ banner e immagini per il README GitHub
+
+    🔐 illustrazioni su privacy, self-custody e decentralized networking
+
+Posso anche impostare uno stile preciso, ad esempio cyberpunk, minimalista, open-source/Linux, cypherpunk, oppure più classico e istituzionale.
+
+Per PAX Wallet, ad esempio, potremmo creare un logo con una colomba bianca stilizzata + una P/X geometrica + rete mesh, mantenendo un aspetto serio e non da solito token crypto da luna in 48 ore.
