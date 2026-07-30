@@ -404,7 +404,6 @@ We stand for:
 - 🔓 **Transparency** — Open source, open network, open future. No hidden backdoors, no hidden agendas.
 - 👤 **Humanity** — We are building technology that serves people, not the other way around. Not profit. Not surveillance. Not control.
 - ⚖️ **Equality** — Accessible to all, regardless of origin, status, or beliefs. Your wallet is your identity. Your rights are your code.
-- 🏴 **Anarchism** — Not chaos, but self-governance. A world where power is distributed, decisions are shared, and freedom is lived, not granted.
 
 ---
 
