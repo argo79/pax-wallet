@@ -577,7 +577,7 @@ Every contribution, big or small, helps keep development alive.
 
 ---
 
-<h3>🐛 Known Issues</h3> <ul> <li>Reticulum gateway in propagation mode (-p) can consume significant resources. Use without -p for lightweight usage.</li> <li>Initial peer discovery may take a few seconds.</li> <li>On slow networks, info requests may timeout (configurable).</li> </ul>
+<h3>🐛 Known Issues</h3> <ul> <li>Initial peer discovery may take a few seconds.</li> <li>On slow networks, info requests may timeout (configurable).</li> </ul>
 
 ---
 
@@ -619,21 +619,3 @@ A wallet that is:
 </p>
 
 
-
-Sì. Posso generare immagini da una descrizione e anche creare grafiche per il tuo progetto, per esempio:
-
-    🕊️ Logo PAX Wallet / HOPE Ecosystem
-
-    🌐 diagramma architetturale del wallet
-
-    📡 illustrazione della rete Reticulum
-
-    💧 icone XRP / ⭐ XLM integrate nel branding
-
-    🖥️ banner e immagini per il README GitHub
-
-    🔐 illustrazioni su privacy, self-custody e decentralized networking
-
-Posso anche impostare uno stile preciso, ad esempio cyberpunk, minimalista, open-source/Linux, cypherpunk, oppure più classico e istituzionale.
-
-Per PAX Wallet, ad esempio, potremmo creare un logo con una colomba bianca stilizzata + una P/X geometrica + rete mesh, mantenendo un aspetto serio e non da solito token crypto da luna in 48 ore.
