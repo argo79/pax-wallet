@@ -192,25 +192,29 @@ Feature Status
                     +----------------+
 ```
 
+---
+
 # 📦 Installation
 
-From Release (Recommended)
+##From Release (Recommended)
 
-## Linux
+### Linux
 ```bash
 wget https://github.com/argo79/pax-wallet/releases/download/v0.9.0b/wallet
 chmod +x wallet
 ./wallet interactive
 ```
 
-## Windows
+### Windows
 ```test
 Download wallet.exe and run
 
 wallet.exe interactive
 ```
 
-From Source
+---
+
+## From Source
 ```bash
 
 # Clone repository
@@ -241,8 +245,11 @@ RNS>=0.5.0
 colorama>=0.4.6
 ```
 
+---
+
 ## 🖥️ CLI Commands
 
+```text
 Command Description
 interactive Launch interactive menu
 create --name NAME  Create new wallet
@@ -269,6 +276,9 @@ Peer metriche   Show peer metrics table
 Miglior gateway Find best gateway for asset
 Richiedi info gateway   Request gateway info
 Invia transazione   Send transaction via Reticulum
+```
+
+---
 
 ## 🌐 Network Architecture
 ```text
@@ -304,7 +314,9 @@ Invia transazione   Send transaction via Reticulum
 └─────────────────────────────────────────────────────────────┘
 ```
 
-### 🔐 Why PAX Wallet?
+---
+
+## 🔐 Why PAX Wallet?
 
 Feature PAX Wallet  Traditional Wallets
 Decentralized   ✅ Yes (Reticulum)   ❌ Central servers
@@ -314,15 +326,22 @@ Network ✅ Mesh (offline-capable)    ❌ Internet only
 Fees    ✅ Minimal   ❌ High (middlemen)
 Freedom ✅ Permissionless    ❌ Gatekeepers
 Speed   ✅ Rust/Core ❌ Slow (interpreted)
-🛠️ Build from Source
-Linux
+
+---
+
+## 🛠️ Build from Source
+
+### Linux
+
 ```bash
 
 ./build_rust_core.sh
 ./build_wallet.sh
 ./dist/wallet interactive
 ```
-Windows
+
+## Windows
+
 ```powershell
 # Install prerequisites
 pip install -r requirements.txt
@@ -334,42 +353,116 @@ pyinstaller --onefile --console --name wallet.exe wallet_cli.py
 wallet.exe interactive
 ```
 
+---
+
 ## 📚 Documentation
 
-    Reticulum: https://reticulum.network/
+- 🌐 [Reticulum Network Stack](https://reticulum.network/)
+- 📖 [XRP Ledger](https://xrpl.org/)
+- ⭐ [Stellar Network](https://stellar.org/)
+- 🔑 [BIP32 - Hierarchical Deterministic Wallets](https://github.com/bitcoin/bips/blob/master/bip-0032.mediawiki)
+- 🗝️ [BIP39 - Mnemonic Code](https://github.com/bitcoin/bips/blob/master/bip-0039.mediawiki)
 
-    XRP Ledger: https://xrpl.org/
-
-    Stellar Network: https://stellar.org/
-
-    BIP32: https://github.com/bitcoin/bips/blob/master/bip-0032.mediawiki
-
-    BIP39: https://github.com/bitcoin/bips/blob/master/bip-0039.mediawiki
+---
 
 ## 🌍 Philosophy
 
-    "Money is freedom. Freedom is human. Human is hope."
+> *"Money is freedom. Freedom is human. Human is hope."*
 
-PAX Wallet is not just a wallet — it's a statement.
+**PAX Wallet** is not just a wallet — it is a declaration of independence.
 
-We believe in:
+It is a tool for those who believe that **money belongs to people**, not to banks, governments, or corporations. It is for those who trust **the human spirit** over institutions, and **mutual aid** over market manipulation.
 
-    Decentralization - No single point of failure, no central authority
+We stand for:
 
-    Privacy - Your transactions are your business
+- 🌱 **Autonomy** — You are the only authority over your wealth. No gatekeepers, no middlemen.
+- 🤝 **Solidarity** — The network is not a hierarchy; it is a community. Every node is equal, every peer is sovereign.
+- 🕊️ **Freedom** — Permissionless by design, borderless by nature. No one can block, freeze, or censor your transactions.
+- 🔓 **Transparency** — Open source, open network, open future. No hidden backdoors, no hidden agendas.
+- 👤 **Humanity** — We are building technology that serves people, not the other way around. Not profit. Not surveillance. Not control.
+- ⚖️ **Equality** — Accessible to all, regardless of origin, status, or beliefs. Your wallet is your identity. Your rights are your code.
+- 🏴 **Anarchism** — Not chaos, but self-governance. A world where power is distributed, decisions are shared, and freedom is lived, not granted.
 
-    Freedom - Permissionless, borderless, open
+---
 
-    Humanity - Technology serving humans, not the other way around
+**We reject:**
 
-### HOPE is the vision. PAX is the tool.
+- Central banks that print your future
+- Corporations that monetize your privacy
+- Algorithms that control your choices
+- Borders that limit your life
+- Systems that reduce you to a number
+
+**We build:**
+
+- A network that does not obey
+- A wallet that does not ask permission
+- A community that does not exclude
+- A future that is free
+
+---
+
+> *"Hope is not a dream. Hope is a choice. And this is our tool to make it real."*
+
+**HOPE** is the vision of a better world.  
+**PAX** is the tool to build it — together, freely, humanly.
+
+---
+
+<p align="center">
+  <i>🌍 In a divided world, HOPE is the dream of a better future. PAX is the tool to build it.</i>
+</p>
+
+<p align="center">
+  <strong>PAX Wallet - Peace Through Free Money</strong><br>
+  <strong>HOPE Ecosystem - Human Open Payment Ecosystem</strong>
+</p>
+
+---
 
 ## 📜 Roadmap
-Version Features
-v1.0.0  Full XRP/XLM support, Trustlines and custom tokens, Stable Reticulum gateway, Peer discovery and metrics
-v1.1.0  Multi-language (IT, EN, RU, CN), CSV/JSON peer export, Automatic wallet backup
-v1.2.0  Native mobile client (Android/iOS), Multi-signature support, Cold storage signing
-v2.0.0  Nomad Network integration, XRP smart contracts (hooks), Full HOPE Ecosystem
+
+### v0.9.0b (Current)
+- ✅ Core wallet XRP/XLM functional
+- ✅ Reticulum gateway and peer discovery
+- ✅ Trustlines and custom tokens
+- ✅ CLI interactive mode
+
+---
+
+### v0.9.5 (Next)
+- 🚧 **TUI (Terminal UI)** — Curses-based interface with menus, tables, real-time updates
+- 🚧 **Reticulum transaction relay** — Send/receive payments over mesh without internet
+- 🚧 **Multi-language support** — IT, EN, RU
+- 🚧 **Wallet export/import** — Complete backup and restore via mnemonic or JSON
+
+---
+
+### v1.0.0 (Stable)
+- 🎯 **Complete XRP/XLM support** — Trustlines, tokens, memos, full transaction history
+- 🎯 **Stable Reticulum gateway** — Production-ready, auto-discovery, peer reputation
+- 🎯 **CLI improvements** — Better error handling, logging, and user feedback
+- 🎯 **Offline transaction signing** — Sign transactions without network connection
+
+---
+
+### v1.1.0 (Enhanced)
+- 🖥️ **Web UI** — Lightweight local web interface for wallet management
+- 🌐 **Multi-language UI** — Complete translations (IT, EN, RU)
+- 📊 **Peer analytics** — Export metrics (CSV/JSON)
+- 🔐 **Encrypted wallet storage** — AES-256 encryption for local wallets
+- 💳 **PayPal integration** — Convert crypto to fiat and withdraw to PayPal (via third-party gateways)
+
+---
+
+### Future (Beyond v1.1)
+- 📱 **Native mobile client** — Android and iOS builds
+- 🔄 **Atomic swaps** — Trustless XRP/XLM exchange
+- 🤝 **Multi-signature wallets** — Shared accounts with threshold signing
+- 🧩 **Plugin system** — Extend wallet with custom modules
+
+---
+
 
 ## 🐛 Known Issues
 
@@ -378,6 +471,8 @@ v2.0.0  Nomad Network integration, XRP smart contracts (hooks), Full HOPE Ecosys
     Initial peer discovery may take a few seconds.
 
     On slow networks, info requests may timeout (configurable).
+
+---
 
 ## 🤝 Contributing
 
