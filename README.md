@@ -488,7 +488,7 @@ We stand for:
 
 ## 🐛 Known Issues
 
-- Initial peer discovery may take a few seconds.
+- Initial peer discovery may take a few minutes/hours.
 
 - On slow networks, info requests may timeout (configurable).
 
