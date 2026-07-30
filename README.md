@@ -545,21 +545,6 @@ This license ensures that PAX Wallet and its derivatives remain **free, open, an
 
 ---
 
-## 💰 Donations
-
-If PAX Wallet is useful to you, consider buying me a virtual coffee! ☕  
-Every contribution, big or small, helps keep development alive.
-
-| Cryptocurrency | Address |
-|----------------|---------|
-| **XRP** (Ripple) | `rBKbetm51vuQQfg4Yo8fvweRya7gedcr9J` |
-| **ETH** (Ethereum) | `0xd2d85288df96B4162814Ca7492039620371b9D81` |
-| **XMR** (Monero) | `87jacZEtYvXcgnvEp7wu45gLwRBYpvwMr3N9dqhNipPWV69XwQX658tS73VEdghLopG1wA4STEdMPcGF8Tc3e18eJyQ4kMA` |
-
-*🙏 Thank you for your support! Every donation is an incentive to improve and add new features.*
-
----
-
 ## 📊 Project Stats
 
 https://img.shields.io/github/stars/argo79/pax-wallet?style=social
@@ -574,6 +559,21 @@ https://img.shields.io/github/last-commit/argo79/pax-wallet
 ---
 
 <h3>📧 Contact</h3><p> <strong>Email:</strong> arg0netds@gmail.com<br> <strong>GitHub:</strong> <a href="https://github.com/argo79/pax-wallet">https://github.com/argo79/pax-wallet</a><br> <strong>RNS Identity:</strong> <code>04511923b68ae34e0fda5721d82f596f</code> </p><p align="center"> <i>📡 Reach me via Reticulum using the identity hash above!</i> </p>
+
+---
+
+## 💰 Donations
+
+If PAX Wallet is useful to you, consider buying me a virtual coffee! ☕  
+Every contribution, big or small, helps keep development alive.
+
+| Cryptocurrency | Address |
+|----------------|---------|
+| **XRP** (Ripple) | `rBKbetm51vuQQfg4Yo8fvweRya7gedcr9J` |
+| **ETH** (Ethereum) | `0xd2d85288df96B4162814Ca7492039620371b9D81` |
+| **XMR** (Monero) | `87jacZEtYvXcgnvEp7wu45gLwRBYpvwMr3N9dqhNipPWV69XwQX658tS73VEdghLopG1wA4STEdMPcGF8Tc3e18eJyQ4kMA` |
+
+*🙏 Thank you for your support! Every donation is an incentive to improve and add new features.*
 
 ---
 
