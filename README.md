@@ -9,7 +9,7 @@
 > **Payment Autonomous eXchange — Peace Through Free Money**
 
 [![Version](https://img.shields.io/badge/version-v0.9.0b-blue.svg)](https://github.com/argo79/pax-wallet/releases)
-[![License: GPLv3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
+[![License: GPLv3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://opensource.org/license/gpl-3.0)
 [![Python](https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white)](https://www.python.org/downloads/)
 [![Rust](https://img.shields.io/badge/Rust-stable-orange?logo=rust)](https://www.rust-lang.org/)
 [![Reticulum](https://img.shields.io/badge/Network-Reticulum-red)](https://github.com/markqvist/Reticulum)
@@ -326,14 +326,17 @@ Invia transazione   Send transaction via Reticulum
 
 ## 🔐 Why PAX Wallet?
 
-Feature PAX Wallet  Traditional Wallets
-Decentralized   ✅ Yes (Reticulum)   ❌ Central servers
-Privacy ✅ End-to-end encrypted  ❌ Metadata exposed
-Control ✅ Self-custodial    ❌ Third-party custody
-Network ✅ Mesh (offline-capable)    ❌ Internet only
-Fees    ✅ Minimal   ❌ High (middlemen)
-Freedom ✅ Permissionless    ❌ Gatekeepers
-Speed   ✅ Rust/Core ❌ Slow (interpreted)
+### Feature PAX Wallet  
+
+Traditional Wallets
+
+- Decentralized   ✅ Yes (Reticulum)   ❌ Central servers
+- Privacy ✅ End-to-end encrypted  ❌ Metadata exposed
+- Control ✅ Self-custodial    ❌ Third-party custody
+- Network ✅ Mesh (offline-capable)    ❌ Internet only
+- Fees    ✅ Minimal   ❌ High (middlemen)
+- Freedom ✅ Permissionless    ❌ Gatekeepers
+- Speed   ✅ Rust/Core ❌ Slow (interpreted)
 
 ---
 
@@ -627,3 +630,21 @@ A wallet that is:
 </p>
 
 
+
+Sì. Posso generare immagini da una descrizione e anche creare grafiche per il tuo progetto, per esempio:
+
+    🕊️ Logo PAX Wallet / HOPE Ecosystem
+
+    🌐 diagramma architetturale del wallet
+
+    📡 illustrazione della rete Reticulum
+
+    💧 icone XRP / ⭐ XLM integrate nel branding
+
+    🖥️ banner e immagini per il README GitHub
+
+    🔐 illustrazioni su privacy, self-custody e decentralized networking
+
+Posso anche impostare uno stile preciso, ad esempio cyberpunk, minimalista, open-source/Linux, cypherpunk, oppure più classico e istituzionale.
+
+Per PAX Wallet, ad esempio, potremmo creare un logo con una colomba bianca stilizzata + una P/X geometrica + rete mesh, mantenendo un aspetto serio e non da solito token crypto da luna in 48 ore.

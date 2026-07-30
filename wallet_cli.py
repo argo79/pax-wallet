@@ -45,11 +45,11 @@ try:
     XLM_AVAILABLE = True
 except ImportError as e:
     XLM_AVAILABLE = False
-    def send_xlm(cli, args):
+    def send_xlm(cli):
         print("❌ Comando XLM non disponibile. Installa stellar-sdk")
-    def history_xlm(cli, args):
+    def history_xlm(cli):
         print("❌ Comando XLM non disponibile. Installa stellar-sdk")
-    def info_xlm(cli, args):
+    def info_xlm(cli):
         print("❌ Comando XLM non disponibile. Installa stellar-sdk")
     def faucet_xlm(cli):
         print("❌ Comando XLM non disponibile. Installa stellar-sdk")
@@ -125,6 +125,17 @@ class WalletCLI:
         # Inizializza Reticulum all'avvio della CLI (una volta sola)
         if RETICULUM_AVAILABLE:
             self._init_reticulum()
+
+    def _validate_wallet_name(self, name: str) -> bool:
+        """Verifica che il nome del wallet sia sicuro (solo caratteri validi)"""
+        if not name:
+            print_red("❌ Nome wallet vuoto")
+            return False
+        if not re.match(r'^[a-zA-Z0-9_-]+$', name):
+            print_red(f"❌ Nome wallet non valido: {name}")
+            print_yellow("   Usa solo lettere, numeri, underscore (_) e trattini (-)")
+            return False
+        return True
 
     def _init_reticulum(self):
         """Inizializza Reticulum UNA SOLA VOLTA all'avvio della CLI"""
@@ -227,6 +238,8 @@ class WalletCLI:
         return ""
     
     def _set_active_wallet_name(self, name: str) -> None:
+        if not self._validate_wallet_name(name):
+            return
         with open(self.active_wallet_name_file, "w") as f:
             f.write(name)
     
@@ -274,12 +287,22 @@ class WalletCLI:
         if not self.wallet or not self.wallet._xrp_manager:
             return False
         
+        if not self._validate_wallet_name(name):
+            return False
+        
         manager = self.wallet._xrp_manager
         
         if not manager.is_loaded():
             return False
         
         dest = self.wallets_dir / f"{name}.json"
+        
+        # Path traversal protection
+        try:
+            dest.resolve().relative_to(self.wallets_dir.resolve())
+        except ValueError:
+            print_red(f"❌ Percorso non valido: {dest}")
+            return False
         
         correct_address = manager._correct_address
         if not correct_address:
@@ -312,7 +335,20 @@ class WalletCLI:
         return True
     
     def _switch_wallet(self, name: str) -> bool:
+        """Cambia il wallet attivo con quello specificato"""
+        # VALIDA IL NOME PRIMA DI USARLO
+        if not self._validate_wallet_name(name):
+            return False
+        
         source = self.wallets_dir / f"{name}.json"
+        
+        # Path traversal protection
+        try:
+            source.resolve().relative_to(self.wallets_dir.resolve())
+        except ValueError:
+            print_red(f"❌ Percorso non valido: {source}")
+            return False
+        
         if not source.exists():
             return False
         
@@ -581,6 +617,9 @@ class WalletCLI:
         if not self.wallet:
             self.init(network)
         
+        if not self._validate_wallet_name(name):
+            return None
+        
         print_blue(f"📤 Creazione wallet {crypto} su {network.upper()}...")
         
         manager = self.wallet._xrp_manager
@@ -610,6 +649,9 @@ class WalletCLI:
     def cmd_import(self, seed_input: str, name: str = "imported", crypto: str = "auto", network: str = "testnet"):
         if not self.wallet:
             self.init(network)
+        
+        if not self._validate_wallet_name(name):
+            return None
         
         print_blue(f"📥 Importazione wallet...")
         
@@ -1021,10 +1063,23 @@ class WalletCLI:
         print("=" * 80)
     
     def cmd_switch(self, name: str):
+        """Cambia il wallet attivo con quello specificato"""
+        # VALIDA IL NOME PRIMA DI USARLO
+        if not self._validate_wallet_name(name):
+            return
+        
         if self._switch_wallet(name):
             print_green(f"✅ Wallet cambiato a: {name}")
             
             wallet_file = self.wallets_dir / f"{name}.json"
+            
+            # Path traversal protection
+            try:
+                wallet_file.resolve().relative_to(self.wallets_dir.resolve())
+            except ValueError:
+                print_red(f"❌ Percorso non valido: {wallet_file}")
+                return
+            
             if wallet_file.exists():
                 try:
                     with open(wallet_file) as f:
@@ -1052,7 +1107,17 @@ class WalletCLI:
             return
         
         name = args[0]
+        if not self._validate_wallet_name(name):
+            return
+        
         target = self.wallets_dir / f"{name}.json"
+        
+        # Path traversal protection
+        try:
+            target.resolve().relative_to(self.wallets_dir.resolve())
+        except ValueError:
+            print_red(f"❌ Percorso non valido: {target}")
+            return
         
         if target.exists():
             self.cmd_switch(name)
