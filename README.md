@@ -2,6 +2,8 @@
   <img src="./img/logo.png" alt="PAX Wallet Logo" width="400">
 </p>
 
+---
+
 # 🕊️ PAX Wallet
 
 > **Payment Autonomous eXchange — Peace Through Free Money**
@@ -67,7 +69,7 @@ Part of the **HOPE Ecosystem (Human Open Payment Ecosystem)**, PAX Wallet promot
 
 ### Network Security
 
-<img src="./img/mappa-generale.png" alt="Scenario" width="800">
+<img src="./img/mappa-generale.png" alt="Scenario" width="1024">
 
 Reticulum provides:
 
