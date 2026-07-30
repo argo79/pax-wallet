@@ -581,17 +581,13 @@ https://img.shields.io/github/last-commit/argo79/pax-wallet
 
 ---
 
-<h3>🔜 Roadmap</h3><ul> <li><strong>v1.0.0</strong> <ul> <li>Full XRP/XLM support</li> <li>Trustlines and custom tokens</li> <li>Stable Reticulum gateway</li> <li>Peer discovery and metrics</li> </ul> </li> <li><strong>v1.1.0</strong> <ul> <li>Multi-language (IT, EN, RU, CN)</li> <li>CSV/JSON peer export</li> <li>Automatic wallet backup</li> </ul> </li> <li><strong>v1.2.0</strong> <ul> <li>Native mobile client (Android/iOS)</li> <li>Multi-signature support</li> <li>Cold storage signing</li> </ul> </li> <li><strong>v2.0.0</strong> <ul> <li>Nomad Network integration</li> <li>XRP smart contracts (hooks)</li> <li>Full HOPE Ecosystem</li> </ul> </li> </ul>
-
----
-
 <h3>🕊️ Philosophy</h3><blockquote> <p><em>"Money is freedom. Freedom is human. Human is hope."</em></p> </blockquote><p> <strong>PAX Wallet</strong> is not just a wallet — it's a statement. </p><p>We believe in:</p> <ul> <li><strong>Decentralization</strong> — No single point of failure, no central authority</li> <li><strong>Privacy</strong> — Your transactions are your business</li> <li><strong>Freedom</strong> — Permissionless, borderless, open</li> <li><strong>Humanity</strong> — Technology serving humans, not the other way around</li> </ul>
 
 ---
 
 <p align="center"> <i><strong>HOPE</strong> is the vision. <strong>PAX</strong> is the tool.</i> </p><p align="center"> <i> 🌍 In a divided world, HOPE is the dream of a better future. PAX is the tool to build it. </i> </p>
 
-<p align="center"> <strong>PAX Wallet - Peace Through Free Money</strong><br> <strong>HOPE Ecosystem - Human Open Payment Ecosystem</strong> </p><p align="center"> <a href="https://github.com/argo79/pax-wallet">🏠 Repository</a> · <a href="https://github.com/argo79/pax-wallet/issues">🐛 Report Bug</a> · <a href="https://github.com/argo79/pax-wallet/discussions">💬 Discussions</a> </p> ```
+<p align="center"> <strong>PAX Wallet - Peace Through Free Money</strong><br> <strong>HOPE Ecosystem - Human Open Payment Ecosystem</strong> </p><p align="center"> <a href="https://github.com/argo79/pax-wallet">🏠 Repository</a> · <a href="https://github.com/argo79/pax-wallet/issues">🐛 Report Bug</a> · <a href="https://github.com/argo79/pax-wallet/discussions">💬 Discussions</a> </p>
 
 ---
 
@@ -622,22 +618,3 @@ A wallet that is:
   <strong>HOPE Ecosystem — Human Open Payment Ecosystem</strong>
 </p>
 
-
-
-Sì. Posso generare immagini da una descrizione e anche creare grafiche per il tuo progetto, per esempio:
-
-    🕊️ Logo PAX Wallet / HOPE Ecosystem
-
-    🌐 diagramma architetturale del wallet
-
-    📡 illustrazione della rete Reticulum
-
-    💧 icone XRP / ⭐ XLM integrate nel branding
-
-    🖥️ banner e immagini per il README GitHub
-
-    🔐 illustrazioni su privacy, self-custody e decentralized networking
-
-Posso anche impostare uno stile preciso, ad esempio cyberpunk, minimalista, open-source/Linux, cypherpunk, oppure più classico e istituzionale.
-
-Per PAX Wallet, ad esempio, potremmo creare un logo con una colomba bianca stilizzata + una P/X geometrica + rete mesh, mantenendo un aspetto serio e non da solito token crypto da luna in 48 ore.
