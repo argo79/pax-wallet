@@ -1,64 +1,102 @@
 #!/bin/bash
-# build_wallet.sh - Build SOLO wallet_cli.py con --collect-all RNS
+# build_wallet.sh - Build wallet_cli.py con supporto multi-lingua
 
 set -e
 
 # ============================================================
-# 0. LEGGI VERSIONE (solo per info, non per il nome)
+# 0. SELEZIONE LINGUA
 # ============================================================
 
-if [[ -f "wallet_cli.py" ]]; then
-    CURRENT_VERSION=$(grep -E 'VERSION\s*=\s*"[0-9]+\.[0-9]+\.[0-9]+[a-z]*"' wallet_cli.py | head -1 | sed -E 's/.*"([0-9]+\.[0-9]+\.[0-9]+[a-z]*)".*/\1/')
+echo "=========================================="
+echo "🌍 Seleziona la lingua per la build:"
+echo "  1) Italiano (wallet_it_cli.py)"
+echo "  2) Inglese (wallet_en_cli.py)"
+echo "=========================================="
+read -p "Scelta (1-2): " LANG_CHOICE
+
+case $LANG_CHOICE in
+    1)
+        SCRIPT_FILE="wallet_it_cli.py"
+        LANG_TAG="it"
+        echo "✅ Build italiana selezionata"
+        ;;
+    2)
+        SCRIPT_FILE="wallet_en_cli.py"
+        LANG_TAG="en"
+        echo "✅ Build inglese selezionata"
+        ;;
+    *)
+        echo "❌ Scelta non valida. Uscita."
+        exit 1
+        ;;
+esac
+
+# ============================================================
+# 1. LEGGI VERSIONE DALLO SCRIPT
+# ============================================================
+
+if [[ -f "$SCRIPT_FILE" ]]; then
+    CURRENT_VERSION=$(grep -E 'VERSION\s*=\s*"[0-9]+\.[0-9]+\.[0-9]+[a-z]*"' "$SCRIPT_FILE" | head -1 | sed -E 's/.*"([0-9]+\.[0-9]+\.[0-9]+[a-z]*)".*/\1/')
     
     if [[ -z "$CURRENT_VERSION" ]]; then
-        CURRENT_VERSION=$(grep -E '__version__\s*=\s*"[0-9]+\.[0-9]+\.[0-9]+[a-z]*"' wallet_cli.py | head -1 | sed -E 's/.*"([0-9]+\.[0-9]+\.[0-9]+[a-z]*)".*/\1/')
+        CURRENT_VERSION=$(grep -E '__version__\s*=\s*"[0-9]+\.[0-9]+\.[0-9]+[a-z]*"' "$SCRIPT_FILE" | head -1 | sed -E 's/.*"([0-9]+\.[0-9]+\.[0-9]+[a-z]*)".*/\1/')
     fi
     
     if [[ -z "$CURRENT_VERSION" ]]; then
         CURRENT_VERSION="0.9.1b"
     fi
 else
-    CURRENT_VERSION="0.9.1b"
+    echo "❌ File $SCRIPT_FILE non trovato!"
+    exit 1
 fi
 
 # ============================================================
-# NOME FINALE: paxwallet (senza estensione per Linux)
+# 2. NOME OUTPUT CON LINGUA
 # ============================================================
-APP_NAME="paxwallet"
+APP_NAME="paxwallet-${LANG_TAG}"
 
 echo "=========================================="
 echo "📦 Build ${APP_NAME} v${CURRENT_VERSION}"
 echo "=========================================="
 
 # ============================================================
-# 1. PULIZIA COMPLETA
+# 3. PULIZIA SOLO DEL TARGET (NON TUTTO!)
 # ============================================================
 
-clean_all() {
+clean_target() {
     echo ""
-    echo "🧹 Pulizia completa..."
+    echo "🧹 Pulizia del file target ${APP_NAME}..."
     
-    rm -rf build dist build_windows dist_windows portable
-    rm -rf *.spec
-    rm -rf __pycache__
-    rm -f wallet wallet.exe "${APP_NAME}"*
+    # Rimuovi SOLO il file specifico, non tutto dist/
+    rm -f "dist/${APP_NAME}" 2>/dev/null || true
+    rm -f "dist/${APP_NAME}.exe" 2>/dev/null || true
+    rm -f "dist_windows/${APP_NAME}.exe" 2>/dev/null || true
     
-    echo "✅ Pulizia completata"
+    # Rimuovi solo il link wallet se punta a questo file
+    if [[ -L "dist/wallet" ]] && [[ "$(readlink dist/wallet)" == "${APP_NAME}" ]]; then
+        rm -f dist/wallet
+    fi
+    
+    # Pulisci solo i file temporanei di questa build
+    rm -rf "build/${APP_NAME}" 2>/dev/null || true
+    rm -f "${APP_NAME}.spec" 2>/dev/null || true
+    
+    echo "✅ Pulizia target completata"
 }
 
 # ============================================================
-# 2. VERIFICA FILE DI BUILD
+# 4. VERIFICA FILE DI BUILD
 # ============================================================
 
 check_files() {
     echo ""
     echo "🔍 Verifica file necessari..."
     
-    if [[ ! -f "wallet_cli.py" ]]; then
-        echo "   ❌ wallet_cli.py non trovato!"
+    if [[ ! -f "$SCRIPT_FILE" ]]; then
+        echo "   ❌ $SCRIPT_FILE non trovato!"
         exit 1
     fi
-    echo "   ✅ wallet_cli.py trovato"
+    echo "   ✅ $SCRIPT_FILE trovato"
     
     if [[ -f "wallet_core.so" ]]; then
         echo "   ✅ wallet_core.so trovato"
@@ -82,7 +120,7 @@ check_files() {
 }
 
 # ============================================================
-# 3. INSTALLA DIPENDENZE
+# 5. INSTALLA DIPENDENZE
 # ============================================================
 
 install_deps() {
@@ -95,7 +133,7 @@ install_deps() {
 }
 
 # ============================================================
-# 4. BUILD LINUX (paxwallet)
+# 6. BUILD LINUX - SOLO TARGET
 # ============================================================
 
 build_linux() {
@@ -114,6 +152,9 @@ build_linux() {
         echo "   ❌ definitions.json non trovato in: $DEFINITIONS_PATH"
         exit 1
     fi
+    
+    # Assicura che dist esista
+    mkdir -p dist
     
     pyinstaller --onefile \
         --name "${APP_NAME}" \
@@ -137,10 +178,12 @@ build_linux() {
         --hidden-import colorama \
         --hidden-import RNS.Interfaces \
         --hidden-import RNS.Interfaces.Interface \
-        wallet_cli.py
+        "$SCRIPT_FILE"
     
     if [[ -f "dist/${APP_NAME}" ]]; then
         echo "   ✅ Linux build completato: dist/${APP_NAME}"
+        # Crea link simbolico wallet -> versione corrente
+        ln -sf "${APP_NAME}" dist/wallet 2>/dev/null || true
     else
         echo "   ❌ Errore: dist/${APP_NAME} non creato"
         exit 1
@@ -148,7 +191,7 @@ build_linux() {
 }
 
 # ============================================================
-# 5. BUILD WINDOWS (paxwallet.exe)
+# 7. BUILD WINDOWS - SOLO TARGET
 # ============================================================
 
 build_windows() {
@@ -174,7 +217,9 @@ build_windows() {
     
     if command -v wine &> /dev/null; then
         echo "   🍷 Usando wine per buildare..."
-        rm -rf build_windows dist_windows
+        rm -rf build_windows
+        
+        mkdir -p dist_windows
         
         WINEPREFIX="${HOME}/.wine" wine python -m PyInstaller --onefile --console \
             --name "${APP_NAME}.exe" \
@@ -196,9 +241,8 @@ build_windows() {
             --hidden-import colorama \
             --hidden-import RNS.Interfaces \
             --hidden-import RNS.Interfaces.Interface \
-            wallet_cli.py
+            "$SCRIPT_FILE"
         
-        mkdir -p dist_windows
         cp dist/"${APP_NAME}.exe" dist_windows/ 2>/dev/null || true
         cp wallet_core.dll dist_windows/ 2>/dev/null || true
         
@@ -209,7 +253,7 @@ build_windows() {
 }
 
 # ============================================================
-# 6. CREA SCRIPT PER WINDOWS NATIVO
+# 8. CREA SCRIPT PER WINDOWS NATIVO
 # ============================================================
 
 create_windows_script() {
@@ -231,7 +275,7 @@ Remove-Item -Recurse -Force build, dist, *.spec -ErrorAction SilentlyContinue
 # VERIFICA
 Write-Host ""
 Write-Host "🔍 Verifica file..." -ForegroundColor Yellow
-if (-not (Test-Path "wallet_cli.py")) {
+if (-not (Test-Path "wallet_en_cli.py") -and -not (Test-Path "wallet_it_cli.py")) {
     Write-Host "   ❌ wallet_cli.py non trovato!" -ForegroundColor Red
     exit 1
 }
@@ -263,6 +307,16 @@ Write-Host "🪟 Build paxwallet.exe..." -ForegroundColor Yellow
 $XRPL_PATH = python -c "import xrpl, os; print(os.path.dirname(xrpl.__file__))" 2>$null
 $DEF_PATH = "$XRPL_PATH/core/binarycodec/definitions/definitions.json"
 
+# Determina il file da buildare
+$SCRIPT_FILE = "wallet_en_cli.py"
+if (Test-Path "wallet_it_cli.py") {
+    Write-Host "   📂 wallet_it_cli.py trovato, build italiano" -ForegroundColor Yellow
+    $SCRIPT_FILE = "wallet_it_cli.py"
+} else {
+    Write-Host "   📂 wallet_en_cli.py trovato, build inglese" -ForegroundColor Yellow
+    $SCRIPT_FILE = "wallet_en_cli.py"
+}
+
 pyinstaller --onefile --console `
     --name "paxwallet.exe" `
     --collect-all RNS `
@@ -283,7 +337,7 @@ pyinstaller --onefile --console `
     --hidden-import colorama `
     --hidden-import RNS.Interfaces `
     --hidden-import RNS.Interfaces.Interface `
-    wallet_cli.py
+    $SCRIPT_FILE
 
 if ($LASTEXITCODE -eq 0) {
     Write-Host "✅ Build completato!" -ForegroundColor Green
@@ -303,40 +357,38 @@ EOF
 }
 
 # ============================================================
-# 7. VERSIONE PORTABLE
+# 9. VERSIONE PORTABLE - SOLO TARGET
 # ============================================================
 
 create_portable() {
     echo ""
-    echo "📦 Creazione versione portable..."
+    echo "📦 Creazione versione portable per ${APP_NAME}..."
 
     # Linux
     if [[ -f "dist/${APP_NAME}" ]]; then
-        mkdir -p portable/linux
-        cp "dist/${APP_NAME}" "portable/linux/"
-        cp wallet_core.so portable/linux/ 2>/dev/null || true
-        echo "   ✅ Linux portable: portable/linux/${APP_NAME}"
+        mkdir -p "portable/linux-${LANG_TAG}"
+        cp "dist/${APP_NAME}" "portable/linux-${LANG_TAG}/"
+        cp wallet_core.so "portable/linux-${LANG_TAG}/" 2>/dev/null || true
+        echo "   ✅ Linux portable: portable/linux-${LANG_TAG}/${APP_NAME}"
     fi
 
     # Windows
     if [[ -f "dist_windows/${APP_NAME}.exe" ]]; then
-        mkdir -p portable/windows
-        cp "dist_windows/${APP_NAME}.exe" "portable/windows/"
-        cp wallet_core.dll portable/windows/ 2>/dev/null || true
-        echo "   ✅ Windows portable: portable/windows/${APP_NAME}.exe"
+        mkdir -p "portable/windows-${LANG_TAG}"
+        cp "dist_windows/${APP_NAME}.exe" "portable/windows-${LANG_TAG}/"
+        cp wallet_core.dll "portable/windows-${LANG_TAG}/" 2>/dev/null || true
+        echo "   ✅ Windows portable: portable/windows-${LANG_TAG}/${APP_NAME}.exe"
     fi
 
-    # Config
-    cp annuncio_config.json portable/ 2>/dev/null || true
     echo "   ✅ Portable creato in portable/"
 }
 
 # ============================================================
-# 8. MAIN
+# 10. MAIN
 # ============================================================
 
 main() {
-    clean_all
+    clean_target
     check_files
     install_deps
     
@@ -352,16 +404,15 @@ main() {
     echo "=========================================="
     echo ""
     echo "📂 Eseguibili:"
-    echo "   Linux:    dist/${APP_NAME}"
-    echo "   Windows:  dist_windows/${APP_NAME}.exe"
-    echo "   Portable: portable/"
+    echo "   Linux:    dist/${APP_NAME}  (link: dist/wallet)"
+    if [[ -f "dist_windows/${APP_NAME}.exe" ]]; then
+        echo "   Windows:  dist_windows/${APP_NAME}.exe"
+    fi
+    echo "   Portable: portable/linux-${LANG_TAG}/  o portable/windows-${LANG_TAG}/"
     echo ""
     echo "💡 Per eseguire:"
     echo "   ./dist/${APP_NAME} interactive"
     echo "   ./dist/${APP_NAME} --help"
-    echo ""
-    echo "📄 Per buildare su Windows nativo:"
-    echo "   powershell -File build_windows.ps1"
     echo "=========================================="
 }
 

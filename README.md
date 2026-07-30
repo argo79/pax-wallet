@@ -208,7 +208,7 @@ Feature Status
 
 ### Linux
 ```bash
-wget https://github.com/argo79/pax-wallet/releases/download/v0.9.0b/paxwallet
+wget https://github.com/argo79/pax-wallet/releases/download/v0.9.1b/paxwallet
 ```
 ```bash
 chmod +x paxwallet
@@ -229,9 +229,20 @@ paxwallet.exe interactive
 ## From Source
 
 ### Clone repository
+
+```bash
+python -m venv venv
+```
+
 ```bash
 git clone https://github.com/argo79/pax-wallet.git
 ```
+
+## Termux on linux
+```bash
+export ANDROID_API_LEVEL=33
+```
+
 ```bash
 cd pax-wallet
 ```

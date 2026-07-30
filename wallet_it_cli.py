@@ -928,7 +928,12 @@ class WalletCLI:
                 explorer = f"https://devnet.xrpl.org/accounts/{address}"
             print(f"\n🔗 Visualizza su: {explorer}")
     
+    # ============================================================
+    # 4. COMANDI PRINCIPALI 
+    # ============================================================
+
     def cmd_send(self, to_address: str, amount: float, memo: str = ""):
+        """Invia pagamento XRP o XLM con conferma"""
         if not self.wallet:
             self.init()
         
@@ -939,51 +944,32 @@ class WalletCLI:
         self._ensure_correct_network()
         manager = self.wallet._xrp_manager
         
+        # Gestione XLM
         if manager.crypto_type == "XLM" and XLM_AVAILABLE:
-            args = [to_address, str(amount)]
-            if memo:
-                args.append(memo)
-            
-            # ============================================================
-            # MOSTRA RIEPILOGO PRIMA DELL'INVIO
-            # ============================================================
-            print_bold("\n📤 INVIO XLM")
-            print("=" * 60)
-            print(f"   Wallet:    {self._get_active_wallet_name()}")
-            print(f"   Da:        {manager.get_address()}")
-            print(f"   A:         {to_address}")
-            print(f"   Importo:   {amount} XLM")
-            if memo:
-                print(f"   📝 Memo:    {memo}")
-            print("=" * 60)
-            print("")
-            
-            confirm = input("   Confermi l'invio? (s/n): ")
-            if confirm.lower() != 's':
-                print_red("❌ Transazione annullata.")
-                return None
-            
-            print_blue("📡 Invio in corso...")
-            send_xlm(self, args)
-            return
+            return self._send_xlm(to_address, amount, memo)
         
-        # ============================================================
-        # RIEPILOGO PER XRP
-        # ============================================================
-        print_bold("\n📤 INVIO XRP")
-        print("=" * 60)
-        print(f"   Wallet:    {self._get_active_wallet_name()}")
-        print(f"   Da:        {manager.get_address()}")
-        print(f"   A:         {to_address}")
-        print(f"   Importo:   {amount} XRP")
+        # Gestione XRP
+        return self._send_xrp(to_address, amount, memo)
+
+    def _send_xlm(self, to_address: str, amount: float, memo: str = ""):
+        """Invia XLM con riepilogo e conferma"""
+        # Mostra riepilogo
+        if not self._confirm_transaction("XLM", to_address, amount, memo):
+            return None
+        
+        print_blue("📡 Invio in corso...")
+        
+        args = [to_address, str(amount)]
         if memo:
-            print(f"   📝 Memo:    {memo}")
-        print("=" * 60)
-        print("")
+            args.append(memo)
         
-        confirm = input("   Confermi l'invio? (s/n): ")
-        if confirm.lower() != 's':
-            print_red("❌ Transazione annullata.")
+        send_xlm(self, args)
+        return True
+
+    def _send_xrp(self, to_address: str, amount: float, memo: str = ""):
+        """Invia XRP con riepilogo e conferma"""
+        # Mostra riepilogo
+        if not self._confirm_transaction("XRP", to_address, amount, memo):
             return None
         
         print_blue("📡 Invio in corso...")
@@ -996,6 +982,8 @@ class WalletCLI:
             from xrpl.wallet import Wallet
             from xrpl.models.transactions import Memo
             
+            manager = self.wallet._xrp_manager
+            
             urls = {
                 "mainnet": "https://s1.ripple.com:51234/",
                 "testnet": "https://s.altnet.rippletest.net:51234/",
@@ -1006,6 +994,7 @@ class WalletCLI:
             wallet = manager.get_wallet("default", 0)
             source_address = wallet.classic_address
             
+            # Controlla saldo
             balance_drops = get_balance(source_address, client)
             balance_xrp = balance_drops / 1_000_000
             
@@ -1021,12 +1010,9 @@ class WalletCLI:
                 "destination": to_address,
             }
             
+            # Aggiungi memo se presente
             if memo:
-                memo_hex = memo.encode('utf-8').hex()
-                if len(memo_hex) % 2 != 0:
-                    memo_hex = '0' + memo_hex
-                if len(memo_hex) > 2048:
-                    memo_hex = memo_hex[:2048]
+                memo_hex = self._encode_memo_hex(memo)
                 payment_params["memos"] = [Memo(memo_data=memo_hex)]
             
             payment = Payment(**payment_params)
@@ -1047,6 +1033,37 @@ class WalletCLI:
         except Exception as e:
             print_red(f"   ❌ Errore: {e}")
             return None
+
+    def _confirm_transaction(self, crypto: str, to_address: str, amount: float, memo: str = "") -> bool:
+        """Mostra il riepilogo e chiede conferma"""
+        manager = self.wallet._xrp_manager
+        
+        print_bold(f"\n📤 INVIO {crypto}")
+        print("=" * 60)
+        print(f"   Wallet:    {self._get_active_wallet_name()}")
+        print(f"   Da:        {manager.get_address()}")
+        print(f"   A:         {to_address}")
+        print(f"   Importo:   {amount} {crypto}")
+        if memo:
+            print(f"   📝 Memo:    {memo}")
+        print("=" * 60)
+        print("")
+        
+        confirm = input("   Confermi l'invio? (s/n): ")
+        if confirm.lower() != 's':
+            print_red("❌ Transazione annullata.")
+            return False
+        
+        return True
+
+    def _encode_memo_hex(self, memo: str) -> str:
+        """Codifica il memo in hex"""
+        memo_hex = memo.encode('utf-8').hex()
+        if len(memo_hex) % 2 != 0:
+            memo_hex = '0' + memo_hex
+        if len(memo_hex) > 2048:
+            memo_hex = memo_hex[:2048]
+        return memo_hex
     
     def cmd_fund_testnet(self):
         if not self.wallet:
