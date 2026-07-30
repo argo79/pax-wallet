@@ -499,16 +499,46 @@ Improve documentation
 
 ---
 
-<h3>📝 License</h3>
+## 📝 License
 
-Distributed under the MIT License.
+Distributed under the **GNU General Public License v3.0**.
 
-https://img.shields.io/badge/License-MIT-yellow.svg
-https://img.shields.io/badge/python-3.11+-blue.svg
-https://img.shields.io/badge/Rust-1.70+-orange.svg
-https://img.shields.io/badge/Reticulum-0.5+-purple.svg
+[![License: GPLv3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
+
+### You are free to:
+
+- ✅ Use this software for any purpose — personal, community, or commercial
+- ✅ Modify and distribute it
+- ✅ Use it to build your own projects
+
+### You must:
+
+- ⚠️ Keep the source code open and available
+- ⚠️ Share your modifications with the community
+- ⚠️ Include the same license in your derivative works
+- ⚠️ Preserve the original copyright and attribution
+
+### Special Exception
+
+If you are an individual or a non-profit organization, you are free to use this software for any purpose, including proprietary projects, as long as you do not charge for it.
+
+For commercial entities, the GPLv3 terms apply in full.
+
+> *"Freedom is not free. It is shared."*
 
 ---
+
+This license ensures that PAX Wallet and its derivatives remain **free, open, and accessible** to everyone — not just those who can pay for it.
+
+**No one can take this code, close it, and profit from it without giving back to the community.**
+
+---
+
+**PAX Wallet — Peace Through Free Money**  
+**HOPE Ecosystem — Human Open Payment Ecosystem**
+
+---
+
 
 ## 💰 Donations
 
