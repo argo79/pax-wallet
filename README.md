@@ -12,7 +12,9 @@
 
 ## 📖 Overview
 
-<img align=centre src="./img/logo.png" alt="logo" width="400">
+<p align="center">
+  <img src="./img/logo.png" alt="PAX Wallet Logo" width="400">
+</p>
 
 **PAX Wallet** is a free, decentralized, human-centric wallet designed for peer-to-peer payments over the **Reticulum** mesh network.
 
@@ -621,21 +623,3 @@ A wallet that is:
 </p>
 
 
-
-Sì. Posso generare immagini da una descrizione e anche creare grafiche per il tuo progetto, per esempio:
-
-    🕊️ Logo PAX Wallet / HOPE Ecosystem
-
-    🌐 diagramma architetturale del wallet
-
-    📡 illustrazione della rete Reticulum
-
-    💧 icone XRP / ⭐ XLM integrate nel branding
-
-    🖥️ banner e immagini per il README GitHub
-
-    🔐 illustrazioni su privacy, self-custody e decentralized networking
-
-Posso anche impostare uno stile preciso, ad esempio cyberpunk, minimalista, open-source/Linux, cypherpunk, oppure più classico e istituzionale.
-
-Per PAX Wallet, ad esempio, potremmo creare un logo con una colomba bianca stilizzata + una P/X geometrica + rete mesh, mantenendo un aspetto serio e non da solito token crypto da luna in 48 ore.
