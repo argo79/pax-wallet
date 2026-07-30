@@ -497,6 +497,8 @@ Feel free to:
 
     Improve documentation
 
+---
+
 <h3>📝 License</h3>
 
 Distributed under the MIT License.
@@ -505,18 +507,25 @@ https://img.shields.io/badge/License-MIT-yellow.svg
 https://img.shields.io/badge/python-3.11+-blue.svg
 https://img.shields.io/badge/Rust-1.70+-orange.svg
 https://img.shields.io/badge/Reticulum-0.5+-purple.svg
-<h3>☕ Support Development</h3><p> If PAX Wallet is useful to you, consider buying me a virtual coffee! ☕ Every contribution, big or small, helps keep development alive. </p><div align="center">
 
-## 💰 Donations
+---
+
+### 💰 Donations
+
+<h3>☕ Support Development</h3><p> If PAX Wallet is useful to you, consider buying me a virtual coffee! ☕ Every contribution, big or small, helps keep development alive. </p><div align="center">
 
 https://img.shields.io/badge/Donate-XRP-00A9FF?style=flat&logo=ripple
 https://img.shields.io/badge/Donate-XLM-08B5E8?style=flat&logo=stellar
 https://img.shields.io/badge/Donate-XMR-FF6600?style=flat&logo=monero
+
 Cryptocurrency  Address
 XRP (Ripple)    rBKbetm51vuQQfg4Yo8fvweRya7gedcr9J
 ETH (Ethereum)   0xd2d85288df96B4162814Ca7492039620371b9D81
 XMR (Monero)    87jacZEtYvXcgnvEp7wu45gLwRBYpvwMr3N9dqhNipPWV69XwQX658tS73VEdghLopG1wA4STEdMPcGF8Tc3e18eJyQ4kMA
+
 </div><p align="center"> <i>🙏 Thank you for your support! Every donation is an incentive to improve and add new features.</i> </p>
+
+---
 
 ## 📊 Project Stats
 
