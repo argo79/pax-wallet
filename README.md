@@ -204,7 +204,7 @@ Feature Status
 
 # 📦 Installation
 
-##From Release (Recommended)
+## From Release (Recommended)
 
 ### Linux
 ```bash
@@ -228,7 +228,7 @@ wallet.exe interactive
 
 ## From Source
 
-# Clone repository
+### Clone repository
 ```bash
 git clone https://github.com/argo79/pax-wallet.git
 ```
@@ -236,7 +236,7 @@ git clone https://github.com/argo79/pax-wallet.git
 cd pax-wallet
 ```
 
-# Install dependencies
+### Install dependencies
 ```bash
 pip install -r requirements.txt
 ```
