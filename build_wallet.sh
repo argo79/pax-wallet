@@ -7,14 +7,14 @@ set -e
 # 0. LEGGI VERSIONE (solo per info, non per il nome)
 # ============================================================
 
-if [ -f "wallet_cli.py" ]; then
+if [[ -f "wallet_cli.py" ]]; then
     CURRENT_VERSION=$(grep -E 'VERSION\s*=\s*"[0-9]+\.[0-9]+\.[0-9]+[a-z]*"' wallet_cli.py | head -1 | sed -E 's/.*"([0-9]+\.[0-9]+\.[0-9]+[a-z]*)".*/\1/')
     
-    if [ -z "$CURRENT_VERSION" ]; then
+    if [[ -z "$CURRENT_VERSION" ]]; then
         CURRENT_VERSION=$(grep -E '__version__\s*=\s*"[0-9]+\.[0-9]+\.[0-9]+[a-z]*"' wallet_cli.py | head -1 | sed -E 's/.*"([0-9]+\.[0-9]+\.[0-9]+[a-z]*)".*/\1/')
     fi
     
-    if [ -z "$CURRENT_VERSION" ]; then
+    if [[ -z "$CURRENT_VERSION" ]]; then
         CURRENT_VERSION="0.9.1b"
     fi
 else
@@ -54,26 +54,26 @@ check_files() {
     echo ""
     echo "🔍 Verifica file necessari..."
     
-    if [ ! -f "wallet_cli.py" ]; then
+    if [[ ! -f "wallet_cli.py" ]]; then
         echo "   ❌ wallet_cli.py non trovato!"
         exit 1
     fi
     echo "   ✅ wallet_cli.py trovato"
     
-    if [ -f "wallet_core.so" ]; then
+    if [[ -f "wallet_core.so" ]]; then
         echo "   ✅ wallet_core.so trovato"
     else
         echo "   ❌ wallet_core.so non trovato!"
         exit 1
     fi
     
-    if [ -f "wallet_core.dll" ]; then
+    if [[ -f "wallet_core.dll" ]]; then
         echo "   ✅ wallet_core.dll trovato"
     else
         echo "   ⚠️ wallet_core.dll non trovato (skip Windows build)"
     fi
     
-    if [ -f "test_api.py" ]; then
+    if [[ -f "test_api.py" ]]; then
         echo ""
         echo "   ⚠️ ATTENZIONE: test_api.py trovato! Rinomino..."
         mv test_api.py test_api.bak
@@ -103,14 +103,14 @@ build_linux() {
     echo "🐧 Build eseguibile per Linux (${APP_NAME})..."
     
     XRPL_PATH=$(python -c "import xrpl, os; print(os.path.dirname(xrpl.__file__))" 2>/dev/null || echo "")
-    if [ -z "$XRPL_PATH" ]; then
+    if [[ -z "$XRPL_PATH" ]]; then
         echo "   ⚠️ xrpl non trovato, installa: pip install xrpl-py"
         return 1
     fi
     echo "   📂 XRPL path: $XRPL_PATH"
     
     DEFINITIONS_PATH="${XRPL_PATH}/core/binarycodec/definitions/definitions.json"
-    if [ ! -f "$DEFINITIONS_PATH" ]; then
+    if [[ ! -f "$DEFINITIONS_PATH" ]]; then
         echo "   ❌ definitions.json non trovato in: $DEFINITIONS_PATH"
         exit 1
     fi
@@ -139,7 +139,7 @@ build_linux() {
         --hidden-import RNS.Interfaces.Interface \
         wallet_cli.py
     
-    if [ -f "dist/${APP_NAME}" ]; then
+    if [[ -f "dist/${APP_NAME}" ]]; then
         echo "   ✅ Linux build completato: dist/${APP_NAME}"
     else
         echo "   ❌ Errore: dist/${APP_NAME} non creato"
@@ -155,19 +155,19 @@ build_windows() {
     echo ""
     echo "🪟 Build eseguibile per Windows..."
     
-    if [ ! -f "wallet_core.dll" ]; then
+    if [[ ! -f "wallet_core.dll" ]]; then
         echo "   ⚠️ wallet_core.dll non trovato! Skip Windows build"
         return 1
     fi
     
     XRPL_PATH=$(python -c "import xrpl, os; print(os.path.dirname(xrpl.__file__))" 2>/dev/null || echo "")
-    if [ -z "$XRPL_PATH" ]; then
+    if [[ -z "$XRPL_PATH" ]]; then
         echo "   ⚠️ xrpl non trovato"
         return 1
     fi
     
     DEFINITIONS_PATH="${XRPL_PATH}/core/binarycodec/definitions/definitions.json"
-    if [ ! -f "$DEFINITIONS_PATH" ]; then
+    if [[ ! -f "$DEFINITIONS_PATH" ]]; then
         echo "   ❌ definitions.json non trovato"
         exit 1
     fi
@@ -311,7 +311,7 @@ create_portable() {
     echo "📦 Creazione versione portable..."
 
     # Linux
-    if [ -f "dist/${APP_NAME}" ]; then
+    if [[ -f "dist/${APP_NAME}" ]]; then
         mkdir -p portable/linux
         cp "dist/${APP_NAME}" "portable/linux/"
         cp wallet_core.so portable/linux/ 2>/dev/null || true
@@ -319,7 +319,7 @@ create_portable() {
     fi
 
     # Windows
-    if [ -f "dist_windows/${APP_NAME}.exe" ]; then
+    if [[ -f "dist_windows/${APP_NAME}.exe" ]]; then
         mkdir -p portable/windows
         cp "dist_windows/${APP_NAME}.exe" "portable/windows/"
         cp wallet_core.dll portable/windows/ 2>/dev/null || true
