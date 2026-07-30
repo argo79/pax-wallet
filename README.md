@@ -567,10 +567,20 @@ This license ensures that PAX Wallet and its derivatives remain **free, open, an
 
 ## 📊 Project Stats
 
-https://img.shields.io/github/stars/argo79/pax-wallet?style=social
-https://img.shields.io/github/forks/argo79/pax-wallet?style=social
-https://img.shields.io/github/issues/argo79/pax-wallet
-https://img.shields.io/github/last-commit/argo79/pax-wallet
+<p align="center">
+  <a href="https://github.com/argo79/pax-wallet/stargazers">
+    <img src="https://img.shields.io/github/stars/argo79/pax-wallet?style=social" alt="Stars">
+  </a>
+  <a href="https://github.com/argo79/pax-wallet/network/members">
+    <img src="https://img.shields.io/github/forks/argo79/pax-wallet?style=social" alt="Forks">
+  </a>
+  <a href="https://github.com/argo79/pax-wallet/issues">
+    <img src="https://img.shields.io/github/issues/argo79/pax-wallet" alt="Issues">
+  </a>
+  <a href="https://github.com/argo79/pax-wallet/commits/main">
+    <img src="https://img.shields.io/github/last-commit/argo79/pax-wallet" alt="Last Commit">
+  </a>
+</p>
 
 ---
 
