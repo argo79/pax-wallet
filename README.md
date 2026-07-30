@@ -607,10 +607,6 @@ Every contribution, big or small, helps keep development alive.
 
 ---
 
-<h3>🐛 Known Issues</h3> <ul> <li>Initial peer discovery may take a few seconds.</li> <li>On slow networks, info requests may timeout (configurable).</li> </ul>
-
----
-
 <h3>🕊️ Philosophy</h3><blockquote> <p><em>"Money is freedom. Freedom is human. Human is hope."</em></p> </blockquote><p> <strong>PAX Wallet</strong> is not just a wallet — it's a statement. </p><p>We believe in:</p> <ul> <li><strong>Decentralization</strong> — No single point of failure, no central authority</li> <li><strong>Privacy</strong> — Your transactions are your business</li> <li><strong>Freedom</strong> — Permissionless, borderless, open</li> <li><strong>Humanity</strong> — Technology serving humans, not the other way around</li> </ul>
 
 ---
