@@ -1,66 +1,109 @@
 #!/bin/bash
-# build_wallet.sh - Build wallet_cli.py con supporto multi-lingua
+# build_wallet.sh - Build wallet_cli.py con supporto multi-lingua e rilevamento piattaforma
 
 set -e
 
 # ============================================================
-# 0. SELEZIONE LINGUA
+# 0. RILEVA PIATTAFORMA
 # ============================================================
 
-echo "=========================================="
-echo "🌍 Seleziona la lingua per la build:"
-echo "  1) Italiano (wallet_it_cli.py)"
-echo "  2) Inglese (wallet_en_cli.py)"
-echo "=========================================="
-read -p "Scelta (1-2): " LANG_CHOICE
+detect_platform() {
+    echo ""
+    echo "🔍 Rilevamento piattaforma..."
+    
+    # Rileva se siamo su Termux/Android
+    if [[ -d "/data/data/com.termux" ]] || [[ -f "/system/build.prop" ]]; then
+        PLATFORM="android"
+        echo "   ✅ Piattaforma: Android (Termux)"
+        return
+    fi
+    
+    # Rileva sistema operativo
+    case "$(uname -s)" in
+        Linux*)
+            PLATFORM="linux"
+            echo "   ✅ Piattaforma: Linux"
+            ;;
+        Darwin*)
+            PLATFORM="macos"
+            echo "   ✅ Piattaforma: macOS"
+            ;;
+        MINGW*|MSYS*|CYGWIN*)
+            PLATFORM="windows"
+            echo "   ✅ Piattaforma: Windows"
+            ;;
+        *)
+            PLATFORM="linux"
+            echo "   ⚠️ Piattaforma non riconosciuta, assumo Linux"
+            ;;
+    esac
+}
 
-case $LANG_CHOICE in
-    1)
-        SCRIPT_FILE="wallet_it_cli.py"
-        LANG_TAG="it"
-        echo "✅ Build italiana selezionata"
-        ;;
-    2)
-        SCRIPT_FILE="wallet_en_cli.py"
-        LANG_TAG="en"
-        echo "✅ Build inglese selezionata"
-        ;;
-    *)
-        echo "❌ Scelta non valida. Uscita."
+# ============================================================
+# 1. SELEZIONE LINGUA
+# ============================================================
+
+select_language() {
+    echo ""
+    echo "=========================================="
+    echo "🌍 Seleziona la lingua per la build:"
+    echo "  1) Italiano (wallet_it_cli.py)"
+    echo "  2) Inglese (wallet_en_cli.py)"
+    echo "=========================================="
+    read -p "Scelta (1-2): " LANG_CHOICE
+
+    case $LANG_CHOICE in
+        1)
+            SCRIPT_FILE="wallet_it_cli.py"
+            LANG_TAG="it"
+            echo "✅ Build italiana selezionata"
+            ;;
+        2)
+            SCRIPT_FILE="wallet_en_cli.py"
+            LANG_TAG="en"
+            echo "✅ Build inglese selezionata"
+            ;;
+        *)
+            echo "❌ Scelta non valida. Uscita."
+            exit 1
+            ;;
+    esac
+}
+
+# ============================================================
+# 2. LEGGI VERSIONE
+# ============================================================
+
+read_version() {
+    if [[ -f "$SCRIPT_FILE" ]]; then
+        CURRENT_VERSION=$(grep -E 'VERSION\s*=\s*"[0-9]+\.[0-9]+\.[0-9]+[a-z]*"' "$SCRIPT_FILE" | head -1 | sed -E 's/.*"([0-9]+\.[0-9]+\.[0-9]+[a-z]*)".*/\1/')
+        
+        if [[ -z "$CURRENT_VERSION" ]]; then
+            CURRENT_VERSION=$(grep -E '__version__\s*=\s*"[0-9]+\.[0-9]+\.[0-9]+[a-z]*"' "$SCRIPT_FILE" | head -1 | sed -E 's/.*"([0-9]+\.[0-9]+\.[0-9]+[a-z]*)".*/\1/')
+        fi
+        
+        if [[ -z "$CURRENT_VERSION" ]]; then
+            CURRENT_VERSION="0.9.1b"
+        fi
+    else
+        echo "❌ File $SCRIPT_FILE non trovato!"
         exit 1
-        ;;
-esac
-
-# ============================================================
-# 1. LEGGI VERSIONE DALLO SCRIPT
-# ============================================================
-
-if [[ -f "$SCRIPT_FILE" ]]; then
-    CURRENT_VERSION=$(grep -E 'VERSION\s*=\s*"[0-9]+\.[0-9]+\.[0-9]+[a-z]*"' "$SCRIPT_FILE" | head -1 | sed -E 's/.*"([0-9]+\.[0-9]+\.[0-9]+[a-z]*)".*/\1/')
-    
-    if [[ -z "$CURRENT_VERSION" ]]; then
-        CURRENT_VERSION=$(grep -E '__version__\s*=\s*"[0-9]+\.[0-9]+\.[0-9]+[a-z]*"' "$SCRIPT_FILE" | head -1 | sed -E 's/.*"([0-9]+\.[0-9]+\.[0-9]+[a-z]*)".*/\1/')
     fi
-    
-    if [[ -z "$CURRENT_VERSION" ]]; then
-        CURRENT_VERSION="0.9.1b"
-    fi
-else
-    echo "❌ File $SCRIPT_FILE non trovato!"
-    exit 1
-fi
+}
 
 # ============================================================
-# 2. NOME OUTPUT CON LINGUA
+# 3. NOME OUTPUT CON LINGUA
 # ============================================================
+
 APP_NAME="paxwallet-${LANG_TAG}"
 
 echo "=========================================="
 echo "📦 Build ${APP_NAME} v${CURRENT_VERSION}"
+echo "   Piattaforma: ${PLATFORM}"
 echo "=========================================="
 
 # ============================================================
-# 3. PULIZIA SOLO DEL TARGET (NON TUTTO!)
+# 4. PULIZIA SOLO DEL TARGET (NON TUTTO!)
 # ============================================================
 
 clean_target() {
@@ -85,7 +128,7 @@ clean_target() {
 }
 
 # ============================================================
-# 4. VERIFICA FILE DI BUILD
+# 5. VERIFICA FILE DI BUILD
 # ============================================================
 
 check_files() {
@@ -98,17 +141,29 @@ check_files() {
     fi
     echo "   ✅ $SCRIPT_FILE trovato"
     
-    if [[ -f "wallet_core.so" ]]; then
-        echo "   ✅ wallet_core.so trovato"
-    else
-        echo "   ❌ wallet_core.so non trovato!"
-        exit 1
-    fi
-    
-    if [[ -f "wallet_core.dll" ]]; then
-        echo "   ✅ wallet_core.dll trovato"
-    else
-        echo "   ⚠️ wallet_core.dll non trovato (skip Windows build)"
+    # Verifica wallet_core in base alla piattaforma
+    if [[ "$PLATFORM" == "android" ]]; then
+        if [[ -f "wallet_core.so" ]]; then
+            echo "   ✅ wallet_core.so trovato"
+        else
+            echo "   ❌ wallet_core.so non trovato!"
+            echo "   Esegui: ./build_rust_core.sh (o compila per Android)"
+            exit 1
+        fi
+    elif [[ "$PLATFORM" == "linux" ]] || [[ "$PLATFORM" == "macos" ]]; then
+        if [[ -f "wallet_core.so" ]]; then
+            echo "   ✅ wallet_core.so trovato"
+        else
+            echo "   ❌ wallet_core.so non trovato!"
+            exit 1
+        fi
+    elif [[ "$PLATFORM" == "windows" ]]; then
+        if [[ -f "wallet_core.dll" ]]; then
+            echo "   ✅ wallet_core.dll trovato"
+        else
+            echo "   ❌ wallet_core.dll non trovato!"
+            exit 1
+        fi
     fi
     
     if [[ -f "test_api.py" ]]; then
@@ -120,25 +175,34 @@ check_files() {
 }
 
 # ============================================================
-# 5. INSTALLA DIPENDENZE
+# 6. INSTALLA DIPENDENZE (ADATTATO PER PIATTAFORMA)
 # ============================================================
 
 install_deps() {
     echo ""
     echo "📦 Verifica dipendenze Python..."
-    pip install bip32 mnemonic xrpl-py stellar-sdk cryptography ecdsa base58 pyinstaller
-    pip install colorama
-    pip install RNS
+    
+    if [[ "$PLATFORM" == "android" ]]; then
+        echo "   📱 Android/Termux: usando versioni compatibili..."
+        pip install bip32 mnemonic xrpl-py stellar-sdk ecdsa base58 pyinstaller
+        pip install colorama
+        pip install RNS --no-deps
+    else
+        pip install bip32 mnemonic xrpl-py stellar-sdk cryptography ecdsa base58 pyinstaller
+        pip install colorama
+        pip install RNS
+    fi
+    
     echo "✅ Dipendenze installate"
 }
 
 # ============================================================
-# 6. BUILD LINUX - SOLO TARGET
+# 7. BUILD LINUX/ANDROID - SOLO TARGET
 # ============================================================
 
-build_linux() {
+build_linux_android() {
     echo ""
-    echo "🐧 Build eseguibile per Linux (${APP_NAME})..."
+    echo "🐧 Build eseguibile per Linux/Android (${APP_NAME})..."
     
     XRPL_PATH=$(python -c "import xrpl, os; print(os.path.dirname(xrpl.__file__))" 2>/dev/null || echo "")
     if [[ -z "$XRPL_PATH" ]]; then
@@ -181,7 +245,7 @@ build_linux() {
         "$SCRIPT_FILE"
     
     if [[ -f "dist/${APP_NAME}" ]]; then
-        echo "   ✅ Linux build completato: dist/${APP_NAME}"
+        echo "   ✅ Build Linux/Android completato: dist/${APP_NAME}"
         # Crea link simbolico wallet -> versione corrente
         ln -sf "${APP_NAME}" dist/wallet 2>/dev/null || true
     else
@@ -191,7 +255,7 @@ build_linux() {
 }
 
 # ============================================================
-# 7. BUILD WINDOWS - SOLO TARGET
+# 8. BUILD WINDOWS - SOLO TARGET
 # ============================================================
 
 build_windows() {
@@ -253,7 +317,7 @@ build_windows() {
 }
 
 # ============================================================
-# 8. CREA SCRIPT PER WINDOWS NATIVO
+# 9. CREA SCRIPT PER WINDOWS NATIVO
 # ============================================================
 
 create_windows_script() {
@@ -357,14 +421,14 @@ EOF
 }
 
 # ============================================================
-# 9. VERSIONE PORTABLE - SOLO TARGET
+# 10. VERSIONE PORTABLE - SOLO TARGET
 # ============================================================
 
 create_portable() {
     echo ""
     echo "📦 Creazione versione portable per ${APP_NAME}..."
 
-    # Linux
+    # Linux/Android
     if [[ -f "dist/${APP_NAME}" ]]; then
         mkdir -p "portable/linux-${LANG_TAG}"
         cp "dist/${APP_NAME}" "portable/linux-${LANG_TAG}/"
@@ -380,22 +444,46 @@ create_portable() {
         echo "   ✅ Windows portable: portable/windows-${LANG_TAG}/${APP_NAME}.exe"
     fi
 
+    # Config
+    cp annuncio_config.json portable/ 2>/dev/null || true
     echo "   ✅ Portable creato in portable/"
 }
 
 # ============================================================
-# 10. MAIN
+# 11. MAIN
 # ============================================================
 
 main() {
+    detect_platform
+    select_language
+    read_version
+    
+    echo ""
+    echo "=========================================="
+    echo "📦 Build ${APP_NAME} v${CURRENT_VERSION}"
+    echo "   Piattaforma: ${PLATFORM}"
+    echo "=========================================="
+    
     clean_target
     check_files
     install_deps
     
-    build_linux
-    build_windows
-    create_windows_script
+    # Build per piattaforma
+    if [[ "$PLATFORM" == "android" ]] || [[ "$PLATFORM" == "linux" ]] || [[ "$PLATFORM" == "macos" ]]; then
+        build_linux_android
+    elif [[ "$PLATFORM" == "windows" ]]; then
+        build_windows
+    else
+        echo "❌ Piattaforma non supportata: ${PLATFORM}"
+        exit 1
+    fi
     
+    # Build Windows aggiuntivo (se su Linux e wine disponibile)
+    if [[ "$PLATFORM" != "windows" ]] && [[ -f "wallet_core.dll" ]] && command -v wine &> /dev/null; then
+        build_windows
+    fi
+    
+    create_windows_script
     create_portable
     
     echo ""
@@ -404,15 +492,25 @@ main() {
     echo "=========================================="
     echo ""
     echo "📂 Eseguibili:"
-    echo "   Linux:    dist/${APP_NAME}  (link: dist/wallet)"
-    if [[ -f "dist_windows/${APP_NAME}.exe" ]]; then
-        echo "   Windows:  dist_windows/${APP_NAME}.exe"
+    if [[ "$PLATFORM" == "android" ]] || [[ "$PLATFORM" == "linux" ]] || [[ "$PLATFORM" == "macos" ]]; then
+        echo "   Linux/Android:    dist/${APP_NAME}  (link: dist/wallet)"
     fi
-    echo "   Portable: portable/linux-${LANG_TAG}/  o portable/windows-${LANG_TAG}/"
+    if [[ -f "dist_windows/${APP_NAME}.exe" ]]; then
+        echo "   Windows:          dist_windows/${APP_NAME}.exe"
+    fi
+    echo "   Portable:          portable/linux-${LANG_TAG}/  o portable/windows-${LANG_TAG}/"
     echo ""
     echo "💡 Per eseguire:"
-    echo "   ./dist/${APP_NAME} interactive"
+    if [[ "$PLATFORM" == "android" ]] || [[ "$PLATFORM" == "linux" ]] || [[ "$PLATFORM" == "macos" ]]; then
+        echo "   ./dist/${APP_NAME} interactive"
+    fi
+    if [[ -f "dist_windows/${APP_NAME}.exe" ]]; then
+        echo "   ./dist_windows/${APP_NAME}.exe interactive"
+    fi
     echo "   ./dist/${APP_NAME} --help"
+    echo ""
+    echo "📄 Per buildare su Windows nativo:"
+    echo "   powershell -File build_windows.ps1"
     echo "=========================================="
 }
 

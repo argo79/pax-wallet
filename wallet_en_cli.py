@@ -202,12 +202,31 @@ class WalletCLI:
                 print_red(f"   Metrics: ❌ NOT AVAILABLE")
 
     def init(self, network: str = None):
-        """Initialize the wallet"""
+        """Inizializza il wallet"""
         active = self._get_active_wallet_name()
+        
+        # ============================================================
+        # VALIDA IL NOME DEL WALLET ATTIVO PRIMA DI USARLO
+        # ============================================================
+        if active:
+            # Validazione del nome
+            if not self._validate_wallet_name(active):
+                print_red(f"⚠️ Nome wallet attivo non valido: {active}")
+                active = None
         
         if active:
             wallet_file = self.wallets_dir / f"{active}.json"
-            if wallet_file.exists():
+            
+            # Path traversal protection
+            try:
+                wallet_file.resolve().relative_to(self.wallets_dir.resolve())
+            except ValueError:
+                print_red(f"❌ Percorso non valido: {wallet_file}")
+                network = "testnet"
+                crypto = "XRP"
+                active = None
+            
+            if active and wallet_file.exists():
                 try:
                     with open(wallet_file) as f:
                         data = json.load(f)
@@ -226,7 +245,7 @@ class WalletCLI:
         self.wallet = create_wallet(self.data_file)
         self.wallet.init_xrp(network=network, crypto=crypto)
         
-        # 🔥 LOAD SAVED WALLET
+        # 🔥 CARICA IL WALLET SALVATO
         loaded = self.wallet._xrp_manager.load()
         if loaded:
             network = self.wallet._xrp_manager.network
@@ -236,7 +255,7 @@ class WalletCLI:
             self.wallet._xrp_manager.set_network(network)
             self.wallet._xrp_manager.set_crypto(crypto)
         
-        print_green(f"✅ Wallet: {active or 'new'} | Network: {network.upper()} | Crypto: {crypto}")
+        print_green(f"✅ Wallet: {active or 'nuovo'} | Rete: {network.upper()} | Crypto: {crypto}")
         return self.wallet
     
     def _get_active_wallet_name(self) -> str:

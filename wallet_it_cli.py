@@ -205,9 +205,28 @@ class WalletCLI:
         """Inizializza il wallet"""
         active = self._get_active_wallet_name()
         
+        # ============================================================
+        # VALIDA IL NOME DEL WALLET ATTIVO PRIMA DI USARLO
+        # ============================================================
+        if active:
+            # Validazione del nome
+            if not self._validate_wallet_name(active):
+                print_red(f"⚠️ Nome wallet attivo non valido: {active}")
+                active = None
+        
         if active:
             wallet_file = self.wallets_dir / f"{active}.json"
-            if wallet_file.exists():
+            
+            # Path traversal protection
+            try:
+                wallet_file.resolve().relative_to(self.wallets_dir.resolve())
+            except ValueError:
+                print_red(f"❌ Percorso non valido: {wallet_file}")
+                network = "testnet"
+                crypto = "XRP"
+                active = None
+            
+            if active and wallet_file.exists():
                 try:
                     with open(wallet_file) as f:
                         data = json.load(f)
