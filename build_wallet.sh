@@ -1,14 +1,13 @@
 #!/bin/bash
-# build_wallet.sh - Build SOLO wallet_cli.py con --collect-all RNS e versioning
+# build_wallet.sh - Build SOLO wallet_cli.py con --collect-all RNS
 
 set -e
 
 # ============================================================
-# 0. LEGGI VERSIONE DA wallet_cli.py
+# 0. LEGGI VERSIONE (solo per info, non per il nome)
 # ============================================================
 
 if [ -f "wallet_cli.py" ]; then
-    # Cerca VERSION = "x.x.x" o __version__ = "x.x.x"
     CURRENT_VERSION=$(grep -E 'VERSION\s*=\s*"[0-9]+\.[0-9]+\.[0-9]+[a-z]*"' wallet_cli.py | head -1 | sed -E 's/.*"([0-9]+\.[0-9]+\.[0-9]+[a-z]*)".*/\1/')
     
     if [ -z "$CURRENT_VERSION" ]; then
@@ -22,8 +21,10 @@ else
     CURRENT_VERSION="0.9.1b"
 fi
 
-APP_NAME="wallet-cli"
-OUTPUT_NAME="${APP_NAME}-${CURRENT_VERSION}"
+# ============================================================
+# NOME FINALE: paxwallet (senza estensione per Linux)
+# ============================================================
+APP_NAME="paxwallet"
 
 echo "=========================================="
 echo "📦 Build ${APP_NAME} v${CURRENT_VERSION}"
@@ -40,7 +41,7 @@ clean_all() {
     rm -rf build dist build_windows dist_windows portable
     rm -rf *.spec
     rm -rf __pycache__
-    rm -f wallet wallet.exe "${APP_NAME}"* "${OUTPUT_NAME}"*
+    rm -f wallet wallet.exe "${APP_NAME}"*
     
     echo "✅ Pulizia completata"
 }
@@ -94,14 +95,13 @@ install_deps() {
 }
 
 # ============================================================
-# 4. BUILD LINUX
+# 4. BUILD LINUX (paxwallet)
 # ============================================================
 
 build_linux() {
     echo ""
-    echo "🐧 Build eseguibile per Linux (${OUTPUT_NAME})..."
+    echo "🐧 Build eseguibile per Linux (${APP_NAME})..."
     
-    # Trova il percorso di xrpl e del file definitions
     XRPL_PATH=$(python -c "import xrpl, os; print(os.path.dirname(xrpl.__file__))" 2>/dev/null || echo "")
     if [ -z "$XRPL_PATH" ]; then
         echo "   ⚠️ xrpl non trovato, installa: pip install xrpl-py"
@@ -115,10 +115,8 @@ build_linux() {
         exit 1
     fi
     
-    # Build con --collect-all RNS e gli hidden import specifici
-
     pyinstaller --onefile \
-        --name wallet-cli-${VERSION} \
+        --name "${APP_NAME}" \
         --collect-all RNS \
         --add-data "wallet_core.so:." \
         --add-data "$DEFINITIONS_PATH:xrpl/core/binarycodec/definitions/" \
@@ -141,18 +139,16 @@ build_linux() {
         --hidden-import RNS.Interfaces.Interface \
         wallet_cli.py
     
-    if [ -f "dist/${OUTPUT_NAME}" ]; then
-        echo "   ✅ Linux build completato: dist/${OUTPUT_NAME}"
-        # Crea un link simbolico senza versione per comodità
-        ln -sf "${OUTPUT_NAME}" dist/wallet 2>/dev/null || true
+    if [ -f "dist/${APP_NAME}" ]; then
+        echo "   ✅ Linux build completato: dist/${APP_NAME}"
     else
-        echo "   ❌ Errore: dist/${OUTPUT_NAME} non creato"
+        echo "   ❌ Errore: dist/${APP_NAME} non creato"
         exit 1
     fi
 }
 
 # ============================================================
-# 5. BUILD WINDOWS (opzionale, con wine)
+# 5. BUILD WINDOWS (paxwallet.exe)
 # ============================================================
 
 build_windows() {
@@ -181,7 +177,7 @@ build_windows() {
         rm -rf build_windows dist_windows
         
         WINEPREFIX="${HOME}/.wine" wine python -m PyInstaller --onefile --console \
-            --name "${OUTPUT_NAME}.exe" \
+            --name "${APP_NAME}.exe" \
             --collect-all RNS \
             --add-data "wallet_core.dll;." \
             --add-data "${DEFINITIONS_PATH};xrpl/core/binarycodec/definitions/" \
@@ -203,10 +199,10 @@ build_windows() {
             wallet_cli.py
         
         mkdir -p dist_windows
-        cp dist/"${OUTPUT_NAME}.exe" dist_windows/ 2>/dev/null || true
+        cp dist/"${APP_NAME}.exe" dist_windows/ 2>/dev/null || true
         cp wallet_core.dll dist_windows/ 2>/dev/null || true
         
-        echo "   ✅ Windows build completato: dist_windows/${OUTPUT_NAME}.exe"
+        echo "   ✅ Windows build completato: dist_windows/${APP_NAME}.exe"
     else
         echo "   ⚠️ wine non trovato, skip Windows build"
     fi
@@ -220,12 +216,11 @@ create_windows_script() {
     echo ""
     echo "📄 Creazione script per Windows nativo..."
     
-    cat > build_windows.ps1 << EOF
+    cat > build_windows.ps1 << 'EOF'
 # build_windows.ps1 - Build Windows con --collect-all RNS
-# Versione: ${VERSION}
 
 Write-Host "==========================================" -ForegroundColor Cyan
-Write-Host "📦 Build Wallet CLI v${VERSION} per Windows" -ForegroundColor Cyan
+Write-Host "📦 Build PAX Wallet per Windows" -ForegroundColor Cyan
 Write-Host "==========================================" -ForegroundColor Cyan
 
 # PULIZIA
@@ -263,16 +258,16 @@ pip install RNS
 
 # BUILD
 Write-Host ""
-Write-Host "🪟 Build wallet-cli-${VERSION}.exe..." -ForegroundColor Yellow
+Write-Host "🪟 Build paxwallet.exe..." -ForegroundColor Yellow
 
-\$XRPL_PATH = python -c "import xrpl, os; print(os.path.dirname(xrpl.__file__))" 2>\$null
-\$DEF_PATH = "\$XRPL_PATH/core/binarycodec/definitions/definitions.json"
+$XRPL_PATH = python -c "import xrpl, os; print(os.path.dirname(xrpl.__file__))" 2>$null
+$DEF_PATH = "$XRPL_PATH/core/binarycodec/definitions/definitions.json"
 
 pyinstaller --onefile --console `
-    --name "wallet-cli-${VERSION}.exe" `
+    --name "paxwallet.exe" `
     --collect-all RNS `
     --add-data "wallet_core.dll;." `
-    --add-data "\$DEF_PATH;xrpl/core/binarycodec/definitions/" `
+    --add-data "$DEF_PATH;xrpl/core/binarycodec/definitions/" `
     --add-data "reticulum;reticulum" `
     --add-data "commands;commands" `
     --add-data "utils;utils" `
@@ -290,12 +285,10 @@ pyinstaller --onefile --console `
     --hidden-import RNS.Interfaces.Interface `
     wallet_cli.py
 
-if (\$LASTEXITCODE -eq 0) {
+if ($LASTEXITCODE -eq 0) {
     Write-Host "✅ Build completato!" -ForegroundColor Green
     Copy-Item wallet_core.dll dist\
-    Write-Host "📂 Eseguibile: dist\wallet-cli-${VERSION}.exe" -ForegroundColor Green
-    # Crea link senza versione
-    New-Item -ItemType SymbolicLink -Path dist\wallet-cli.exe -Target "wallet-cli-${VERSION}.exe" -Force | Out-Null
+    Write-Host "📂 Eseguibile: dist\paxwallet.exe" -ForegroundColor Green
 } else {
     Write-Host "❌ Errore nella build!" -ForegroundColor Red
     exit 1
@@ -303,7 +296,7 @@ if (\$LASTEXITCODE -eq 0) {
 
 Write-Host ""
 Write-Host "💡 Per eseguire:" -ForegroundColor Cyan
-Write-Host "   .\dist\wallet-cli-${VERSION}.exe interactive" -ForegroundColor Yellow
+Write-Host "   .\dist\paxwallet.exe interactive" -ForegroundColor Yellow
 EOF
 
     echo "   ✅ Script creato: build_windows.ps1"
@@ -318,19 +311,19 @@ create_portable() {
     echo "📦 Creazione versione portable..."
 
     # Linux
-    if [ -f "dist/${OUTPUT_NAME}" ]; then
+    if [ -f "dist/${APP_NAME}" ]; then
         mkdir -p portable/linux
-        cp "dist/${OUTPUT_NAME}" "portable/linux/"
+        cp "dist/${APP_NAME}" "portable/linux/"
         cp wallet_core.so portable/linux/ 2>/dev/null || true
-        echo "   ✅ Linux portable: portable/linux/${OUTPUT_NAME}"
+        echo "   ✅ Linux portable: portable/linux/${APP_NAME}"
     fi
 
     # Windows
-    if [ -f "dist_windows/${OUTPUT_NAME}.exe" ]; then
+    if [ -f "dist_windows/${APP_NAME}.exe" ]; then
         mkdir -p portable/windows
-        cp "dist_windows/${OUTPUT_NAME}.exe" "portable/windows/"
+        cp "dist_windows/${APP_NAME}.exe" "portable/windows/"
         cp wallet_core.dll portable/windows/ 2>/dev/null || true
-        echo "   ✅ Windows portable: portable/windows/${OUTPUT_NAME}.exe"
+        echo "   ✅ Windows portable: portable/windows/${APP_NAME}.exe"
     fi
 
     # Config
@@ -359,13 +352,13 @@ main() {
     echo "=========================================="
     echo ""
     echo "📂 Eseguibili:"
-    echo "   Linux:    dist/${OUTPUT_NAME}  (link: dist/wallet)"
-    echo "   Windows:  dist_windows/${OUTPUT_NAME}.exe"
+    echo "   Linux:    dist/${APP_NAME}"
+    echo "   Windows:  dist_windows/${APP_NAME}.exe"
     echo "   Portable: portable/"
     echo ""
     echo "💡 Per eseguire:"
-    echo "   ./dist/wallet interactive"
-    echo "   ./dist/${OUTPUT_NAME} --help"
+    echo "   ./dist/${APP_NAME} interactive"
+    echo "   ./dist/${APP_NAME} --help"
     echo ""
     echo "📄 Per buildare su Windows nativo:"
     echo "   powershell -File build_windows.ps1"

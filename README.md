@@ -211,17 +211,17 @@ Feature Status
 wget https://github.com/argo79/pax-wallet/releases/download/v0.9.0b/wallet
 ```
 ```bash
-chmod +x wallet
+chmod +x paxwallet
 ```
 ```bash
-./wallet interactive
+./paxwallet interactive
 ```
 
 ### Windows
 
 Download wallet.exe and run
 ```powershell
-wallet.exe interactive
+paxwallet.exe interactive
 ```
 
 ---
@@ -360,7 +360,7 @@ Traditional Wallets
 
 ./build_rust_core.sh
 ./build_wallet.sh
-./dist/wallet interactive
+./dist/paxwallet interactive
 ```
 
 ## Windows
@@ -370,10 +370,10 @@ Traditional Wallets
 pip install -r requirements.txt
 
 # Build (requires wallet_core.dll)
-pyinstaller --onefile --console --name wallet.exe wallet_cli.py
+pyinstaller --onefile --console --name paxwallet.exe wallet_cli.py
 
 # Run
-wallet.exe interactive
+paxwallet.exe interactive
 ```
 
 ---
@@ -645,3 +645,21 @@ A wallet that is:
 </p>
 
 
+
+Sì. Posso generare immagini da una descrizione e anche creare grafiche per il tuo progetto, per esempio:
+
+    🕊️ Logo PAX Wallet / HOPE Ecosystem
+
+    🌐 diagramma architetturale del wallet
+
+    📡 illustrazione della rete Reticulum
+
+    💧 icone XRP / ⭐ XLM integrate nel branding
+
+    🖥️ banner e immagini per il README GitHub
+
+    🔐 illustrazioni su privacy, self-custody e decentralized networking
+
+Posso anche impostare uno stile preciso, ad esempio cyberpunk, minimalista, open-source/Linux, cypherpunk, oppure più classico e istituzionale.
+
+Per PAX Wallet, ad esempio, potremmo creare un logo con una colomba bianca stilizzata + una P/X geometrica + rete mesh, mantenendo un aspetto serio e non da solito token crypto da luna in 48 ore.
