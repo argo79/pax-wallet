@@ -518,11 +518,14 @@ Distributed under the **GNU General Public License v3.0**.
 - ⚠️ Include the same license in your derivative works
 - ⚠️ Preserve the original copyright and attribution
 
+
 ### Special Exception
 
 If you are an individual or a non-profit organization, you are free to use this software for any purpose, including proprietary projects, as long as you do not charge for it.
 
 For commercial entities, the GPLv3 terms apply in full.
+
+---
 
 > *"Freedom is not free. It is shared."*
 
@@ -534,8 +537,10 @@ This license ensures that PAX Wallet and its derivatives remain **free, open, an
 
 ---
 
-**PAX Wallet — Peace Through Free Money**  
-**HOPE Ecosystem — Human Open Payment Ecosystem**
+<p align="center">
+  <span style="color: #FFD700; font-weight: bold;">PAX Wallet — Peace Through Free Money</span><br>
+  <span style="color: #FF4444; font-weight: bold;">HOPE Ecosystem — Human Open Payment Ecosystem</span>
+</p>
 
 ---
 
