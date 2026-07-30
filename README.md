@@ -209,33 +209,45 @@ Feature Status
 ### Linux
 ```bash
 wget https://github.com/argo79/pax-wallet/releases/download/v0.9.0b/wallet
+```
+```bash
 chmod +x wallet
+```
+```bash
 ./wallet interactive
 ```
 
 ### Windows
-```test
-Download wallet.exe and run
 
+Download wallet.exe and run
+```powershell
 wallet.exe interactive
 ```
 
 ---
 
 ## From Source
-```bash
 
 # Clone repository
+```bash
 git clone https://github.com/argo79/pax-wallet.git
+```
+```bash
 cd pax-wallet
+```
 
 # Install dependencies
+```bash
 pip install -r requirements.txt
+```
 
 # Build Rust core (optional, pre-built libs included)
+```bash
 ./build_rust_core.sh
+```
 
 # Run
+```bash
 python3 wallet_cli.py interactive
 ```
 
