@@ -526,6 +526,7 @@ If you are an individual or a non-profit organization, you are free to use this 
 For commercial entities, the GPLv3 terms apply in full.
 
 ---
+
 <p align="center">
   <span style="color: #FFD700; font-style: italic; font-size: 1.1em;">
     "Freedom is not free. It is shared."
@@ -535,6 +536,7 @@ For commercial entities, the GPLv3 terms apply in full.
     — PAX Wallet
   </span>
 </p>
+
 ---
 
 This license ensures that PAX Wallet and its derivatives remain **free, open, and accessible** to everyone — not just those who can pay for it.
