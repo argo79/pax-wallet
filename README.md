@@ -30,6 +30,9 @@ Part of the **HOPE Ecosystem (Human Open Payment Ecosystem)**, PAX Wallet promot
 - 🕊️ Human sovereignty
 - 💸 Free and open money
 
+
+<img src="./img/archi-tech.png" alt="archi" width="1024">
+
 ---
 
 ## 🔧 Technical Specifications
@@ -69,8 +72,6 @@ Part of the **HOPE Ecosystem (Human Open Payment Ecosystem)**, PAX Wallet promot
 
 ### Network Security
 
-<img src="./img/mappa-generale.png" alt="Scenario" width="1024">
-
 Reticulum provides:
 
 - 🔐 End-to-end encryption
@@ -98,6 +99,8 @@ Reticulum provides:
 ---
 
 ## 🚀 Features
+
+<img src="./img/mappa-generale.png" alt="Scenario" width="1024">
 
 ### Wallet Management
 
