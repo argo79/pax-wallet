@@ -553,7 +553,7 @@ For commercial entities, the GPLv3 terms apply in full.
   </span>
   <br>
   <span style="color: #FFD700; font-size: 0.8em; opacity: 0.7;">
-    — PAX Wallet
+    — PAX Wallet —
   </span>
 </p>
 
