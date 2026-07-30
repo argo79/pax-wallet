@@ -4,15 +4,29 @@
 set -e
 
 # ============================================================
-# 0. CONFIGURAZIONE VERSIONE E NOME
+# 0. LEGGI VERSIONE DA wallet_cli.py
 # ============================================================
 
-VERSION="0.9.0b"  # Modifica qui per aggiornare la versione
+if [ -f "wallet_cli.py" ]; then
+    # Cerca VERSION = "x.x.x" o __version__ = "x.x.x"
+    CURRENT_VERSION=$(grep -E 'VERSION\s*=\s*"[0-9]+\.[0-9]+\.[0-9]+[a-z]*"' wallet_cli.py | head -1 | sed -E 's/.*"([0-9]+\.[0-9]+\.[0-9]+[a-z]*)".*/\1/')
+    
+    if [ -z "$CURRENT_VERSION" ]; then
+        CURRENT_VERSION=$(grep -E '__version__\s*=\s*"[0-9]+\.[0-9]+\.[0-9]+[a-z]*"' wallet_cli.py | head -1 | sed -E 's/.*"([0-9]+\.[0-9]+\.[0-9]+[a-z]*)".*/\1/')
+    fi
+    
+    if [ -z "$CURRENT_VERSION" ]; then
+        CURRENT_VERSION="0.9.1b"
+    fi
+else
+    CURRENT_VERSION="0.9.1b"
+fi
+
 APP_NAME="wallet-cli"
-OUTPUT_NAME="${APP_NAME}-${VERSION}"
+OUTPUT_NAME="${APP_NAME}-${CURRENT_VERSION}"
 
 echo "=========================================="
-echo "📦 Build ${APP_NAME} v${VERSION}"
+echo "📦 Build ${APP_NAME} v${CURRENT_VERSION}"
 echo "=========================================="
 
 # ============================================================

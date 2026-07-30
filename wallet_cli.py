@@ -15,6 +15,13 @@ from typing import Optional, List, Dict, Any, Union
 import threading
 
 # ============================================================
+# VERSIONE
+# ============================================================
+VERSION = "0.9.1b"
+__version__ = VERSION
+
+
+# ============================================================
 # PATCH PER RETICULUM - DEVE ESSERE PRIMA DI TUTTO!
 # ============================================================
 import RNS
@@ -121,7 +128,7 @@ class WalletCLI:
         self.reticulum_initialized = False
         self.reticulum_config = ReticulumConfig()
         self.metrics = None
-        
+
         # Inizializza Reticulum all'avvio della CLI (una volta sola)
         if RETICULUM_AVAILABLE:
             self._init_reticulum()
