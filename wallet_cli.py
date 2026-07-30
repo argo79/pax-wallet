@@ -943,10 +943,50 @@ class WalletCLI:
             args = [to_address, str(amount)]
             if memo:
                 args.append(memo)
+            
+            # ============================================================
+            # MOSTRA RIEPILOGO PRIMA DELL'INVIO
+            # ============================================================
+            print_bold("\n📤 INVIO XLM")
+            print("=" * 60)
+            print(f"   Wallet:    {self._get_active_wallet_name()}")
+            print(f"   Da:        {manager.get_address()}")
+            print(f"   A:         {to_address}")
+            print(f"   Importo:   {amount} XLM")
+            if memo:
+                print(f"   📝 Memo:    {memo}")
+            print("=" * 60)
+            print("")
+            
+            confirm = input("   Confermi l'invio? (s/n): ")
+            if confirm.lower() != 's':
+                print_red("❌ Transazione annullata.")
+                return None
+            
+            print_blue("📡 Invio in corso...")
             send_xlm(self, args)
             return
         
-        print_blue(f"💸 Invio {amount} XRP a {to_address} su {manager.network.upper()}...")
+        # ============================================================
+        # RIEPILOGO PER XRP
+        # ============================================================
+        print_bold("\n📤 INVIO XRP")
+        print("=" * 60)
+        print(f"   Wallet:    {self._get_active_wallet_name()}")
+        print(f"   Da:        {manager.get_address()}")
+        print(f"   A:         {to_address}")
+        print(f"   Importo:   {amount} XRP")
+        if memo:
+            print(f"   📝 Memo:    {memo}")
+        print("=" * 60)
+        print("")
+        
+        confirm = input("   Confermi l'invio? (s/n): ")
+        if confirm.lower() != 's':
+            print_red("❌ Transazione annullata.")
+            return None
+        
+        print_blue("📡 Invio in corso...")
         
         try:
             from xrpl.account import get_balance
