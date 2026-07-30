@@ -527,7 +527,11 @@ For commercial entities, the GPLv3 terms apply in full.
 
 ---
 
-> *"Freedom is not free. It is shared."*
+<p align="center">
+  <blockquote style="border-left: 4px solid #FFD700; padding-left: 16px; color: #FFD700; font-style: italic;">
+    "Freedom is not free. It is shared."
+  </blockquote>
+</p>
 
 ---
 
