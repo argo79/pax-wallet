@@ -585,9 +585,9 @@ Every contribution, big or small, helps keep development alive.
 
 ---
 
-<p align="center"> <i><strong>HOPE</strong> is the vision. <strong>PAX</strong> is the tool.</i> </p><p align="center"> <i> 🌍 In a divided world, HOPE is the dream of a better future. PAX is the tool to build it. </i> </p>
+<p align="center"> <i><strong>HOPE</strong> is the vision. <strong>PAX</strong> is the tool.</i> </p><p align="center"> <i> 🌍  In a divided world, HOPE is the dream of a better future. PAX is the tool to build it. </i> </p>
 
-<p align="center"> <strong>PAX Wallet - Peace Through Free Money</strong><br> <strong>HOPE Ecosystem - Human Open Payment Ecosystem</strong> </p><p align="center"> <a href="https://github.com/argo79/pax-wallet">🏠 Repository</a> · <a href="https://github.com/argo79/pax-wallet/issues">🐛 Report Bug</a> · <a href="https://github.com/argo79/pax-wallet/discussions">💬 Discussions</a> </p>
+<p align="center"> <strong>PAX Wallet - Peace Through Free Money</strong><br> <strong>HOPE Ecosystem - Human Open Payment Ecosystem</strong> </p><p align="center"> <a href="https://github.com/argo79/pax-wallet">Repository</a> · <a href="https://github.com/argo79/pax-wallet/issues">Report Bug</a> · <a href="https://github.com/argo79/pax-wallet/releases">Release</a> </p>
 
 ---
 
@@ -619,3 +619,21 @@ A wallet that is:
 </p>
 
 
+
+Sì. Posso generare immagini da una descrizione e anche creare grafiche per il tuo progetto, per esempio:
+
+    🕊️ Logo PAX Wallet / HOPE Ecosystem
+
+    🌐 diagramma architetturale del wallet
+
+    📡 illustrazione della rete Reticulum
+
+    💧 icone XRP / ⭐ XLM integrate nel branding
+
+    🖥️ banner e immagini per il README GitHub
+
+    🔐 illustrazioni su privacy, self-custody e decentralized networking
+
+Posso anche impostare uno stile preciso, ad esempio cyberpunk, minimalista, open-source/Linux, cypherpunk, oppure più classico e istituzionale.
+
+Per PAX Wallet, ad esempio, potremmo creare un logo con una colomba bianca stilizzata + una P/X geometrica + rete mesh, mantenendo un aspetto serio e non da solito token crypto da luna in 48 ore.
