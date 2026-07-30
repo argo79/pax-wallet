@@ -208,7 +208,7 @@ Feature Status
 
 ### Linux
 ```bash
-wget https://github.com/argo79/pax-wallet/releases/download/v0.9.0b/wallet
+wget https://github.com/argo79/pax-wallet/releases/download/v0.9.0b/paxwallet
 ```
 ```bash
 chmod +x paxwallet
