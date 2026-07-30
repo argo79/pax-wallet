@@ -184,8 +184,8 @@ lxmd*.log
 # 16. FILE CHE NON DEVONO FINIRE SU GIT
 # ============================================================
 # Librerie compilate
-wallet_core.so
-wallet_core.dll
+#wallet_core.so
+#wallet_core.dll
 
 # Database utente
 wallet_cli.db
