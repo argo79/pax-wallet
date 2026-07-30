@@ -488,11 +488,9 @@ We stand for:
 
 ## 🐛 Known Issues
 
-Reticulum gateway in propagation mode (-p) can consume significant resources. Use without -p for lightweight usage.
+- Initial peer discovery may take a few seconds.
 
-Initial peer discovery may take a few seconds.
-
-On slow networks, info requests may timeout (configurable).
+- On slow networks, info requests may timeout (configurable).
 
 ---
 
