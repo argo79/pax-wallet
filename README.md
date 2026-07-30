@@ -573,7 +573,7 @@ https://img.shields.io/github/last-commit/argo79/pax-wallet
 
 ---
 
-<h3>📧 Contact</h3><p> <strong>Email:</strong> arg0netds@gmail.com<br> <strong>GitHub:</strong> <a href="https://github.com/argo79/pax-wallet">https://github.com/argo79/pax-wallet</a><br> <strong>RNS Identity:</strong> <code>877c43067be84c0442a6c4d547332f33</code> </p><p align="center"> <i>📡 Reach me via Reticulum using the identity hash above!</i> </p>
+<h3>📧 Contact</h3><p> <strong>Email:</strong> arg0netds@gmail.com<br> <strong>GitHub:</strong> <a href="https://github.com/argo79/pax-wallet">https://github.com/argo79/pax-wallet</a><br> <strong>RNS Identity:</strong> <code>04511923b68ae34e0fda5721d82f596f</code> </p><p align="center"> <i>📡 Reach me via Reticulum using the identity hash above!</i> </p>
 
 ---
 
@@ -618,3 +618,22 @@ A wallet that is:
   <strong>HOPE Ecosystem — Human Open Payment Ecosystem</strong>
 </p>
 
+
+
+Sì. Posso generare immagini da una descrizione e anche creare grafiche per il tuo progetto, per esempio:
+
+    🕊️ Logo PAX Wallet / HOPE Ecosystem
+
+    🌐 diagramma architetturale del wallet
+
+    📡 illustrazione della rete Reticulum
+
+    💧 icone XRP / ⭐ XLM integrate nel branding
+
+    🖥️ banner e immagini per il README GitHub
+
+    🔐 illustrazioni su privacy, self-custody e decentralized networking
+
+Posso anche impostare uno stile preciso, ad esempio cyberpunk, minimalista, open-source/Linux, cypherpunk, oppure più classico e istituzionale.
+
+Per PAX Wallet, ad esempio, potremmo creare un logo con una colomba bianca stilizzata + una P/X geometrica + rete mesh, mantenendo un aspetto serio e non da solito token crypto da luna in 48 ore.
