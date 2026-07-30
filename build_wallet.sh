@@ -1,5 +1,6 @@
 #!/bin/bash
 # build_wallet.sh - Build wallet_cli.py con supporto multi-lingua e rilevamento piattaforma
+# Versione ottimizzata per Termux/Android con coincurve 19.0.0
 
 set -e
 
@@ -184,7 +185,18 @@ install_deps() {
     
     if [[ "$PLATFORM" == "android" ]]; then
         echo "   📱 Android/Termux: usando versioni compatibili..."
-        pip install bip32 mnemonic xrpl-py stellar-sdk ecdsa base58 pyinstaller
+        
+        # Installa coincurve 19.0.0 prima
+        echo "   📦 coincurve 19.0.0..."
+        pip install coincurve==19.0.0
+        
+        # Poi bip32
+        echo "   📦 bip32..."
+        pip install bip32
+        
+        # Poi il resto
+        echo "   📦 altre dipendenze..."
+        pip install mnemonic xrpl-py stellar-sdk ecdsa base58 pyinstaller
         pip install colorama
         pip install RNS --no-deps
     else
@@ -237,6 +249,7 @@ build_linux_android() {
         --hidden-import cryptography \
         --hidden-import ecdsa \
         --hidden-import base58 \
+        --hidden-import coincurve \
         --hidden-import wallet_manager \
         --hidden-import core_wrapper \
         --hidden-import colorama \
