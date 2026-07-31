@@ -460,6 +460,53 @@ class WalletCLI:
                 except:
                     pass
     
+    def cmd_remove_wallet(self):
+        """Rimuovi un wallet dalla lista"""
+        wallets = self._get_wallet_list()
+        if not wallets:
+            print_red("❌ Nessun wallet salvato.")
+            return
+        
+        active = self._get_active_wallet_name()
+        
+        print("\n🗑️  RIMUOVI WALLET")
+        print("=" * 60)
+        print(f"{'#':<4} {'Nome':<18} {'Crypto':<6} {'Rete':<8}")
+        print("-" * 60)
+        
+        for i, w in enumerate(wallets, 1):
+            marker = "▶" if w["name"] == active else " "
+            print(f"{i:<4} {marker} {w['name']:<17} {w.get('crypto', 'XRP'):<6} {w.get('network', 'testnet'):<8}")
+        
+        print("-" * 60)
+        print("=" * 60)
+        
+        choice = input("\nNumero wallet da rimuovere (o Invio per saltare): ").strip()
+        if not choice:
+            return
+        
+        if choice.isdigit():
+            idx = int(choice) - 1
+            if 0 <= idx < len(wallets):
+                wallet_name = wallets[idx]["name"]
+                if wallet_name == active:
+                    print_red(f"❌ Non puoi rimuovere il wallet attivo: {wallet_name}")
+                    return
+                confirm = input(f"   Rimuovere wallet '{wallet_name}'? (s/N): ").strip().lower()
+                if confirm == 's':
+                    wallet_file = self.wallets_dir / f"{wallet_name}.json"
+                    if wallet_file.exists():
+                        wallet_file.unlink()
+                        print_green(f"✅ Wallet '{wallet_name}' rimosso!")
+                    else:
+                        print_yellow(f"⚠️ File non trovato: {wallet_file}")
+                else:
+                    print_yellow("❌ Rimozione annullata")
+            else:
+                print_red("❌ Numero non valido")
+        else:
+            print_yellow("❌ Inserisci un numero valido")
+
     # ============================================================
     # PARSE TX DATE - DAL VECCHIO CODICE
     # ============================================================
@@ -632,8 +679,84 @@ class WalletCLI:
         print("└────┴─────────────────────┴────────────┴──────────────────┴────────────┴──────────────────────────────────────────────────┴────────────────────┘")
         print(f"Totale: {len(transactions)} transazioni mostrate")
 
-
     
+    def cmd_test_gateways(self):
+        """Testa tutti i gateway disponibili e mostra le performance"""
+        if not self.metrics:
+            print_red("❌ Metriche non disponibili")
+            return
+        
+        print_blue("🔍 Test di tutti i gateway in corso...")
+        
+        gateways = self.reticulum.discover_gateways()
+        
+        if not gateways:
+            print_red("❌ Nessun gateway trovato")
+            return
+        
+        print_bold(f"\n🧪 TEST GATEWAY ({len(gateways)})")
+        print("=" * 120)
+        print(f"{'#':<3} {'Nome':<16} {'Status':<10} {'RTT':<10} {'XRP':<12} {'Stellar':<12} {'Hops':<6} {'Score'}")
+        print("-" * 120)
+        
+        results = []
+        for idx, gw in enumerate(gateways, 1):
+            name = gw.get('name', 'UNKNOWN')[:14]
+            gw_id = gw.get('gateway_id', '')
+            hops = gw.get('hops', '?')
+            
+            # 🔥 USA request_gateway_info() INVECE DI send_ping()
+            start = time.time()
+            try:
+                success = self.metrics.request_gateway_info(gw_id)
+                rtt = (time.time() - start) * 1000
+                if success:
+                    status = "✅ Online"
+                    # Prendi i dati aggiornati
+                    peers = self.metrics.get_all_peers()
+                    for p in peers:
+                        if p.get('gateway_id') == gw_id:
+                            gw = p
+                            break
+                else:
+                    status = "❌ Offline"
+                    rtt = None
+            except Exception as e:
+                status = "❌ Offline"
+                rtt = None
+            
+            # Calcola score
+            score = 0
+            if rtt and status == "✅ Online":
+                score += max(0, 50 - rtt/10)
+            
+            xrp = "✅" if gw.get('xrp_reachable') else "❌"
+            stellar = "✅" if gw.get('stellar_reachable') else "❌"
+            
+            if gw.get('xrp_reachable'):
+                score += 10
+            if gw.get('stellar_reachable'):
+                score += 10
+            if gw.get('has_internet'):
+                score += 5
+            
+            rtt_str = f"{rtt:.1f}ms" if rtt else "Timeout"
+            
+            print(f"{idx:<3} {name:<16} {status:<10} {rtt_str:<10} {xrp:<12} {stellar:<12} {hops:<6} {score:.0f}")
+            results.append({"name": name, "status": status, "score": score, "gw_id": gw_id})
+        
+        print("=" * 120)
+        
+        # Miglior gateway
+        online = [r for r in results if r["status"] == "✅ Online"]
+        if online:
+            best = max(online, key=lambda x: x["score"])
+            print(f"\n🏆 Miglior gateway: {best['name']} (Score: {best['score']:.0f})")
+            print(f"   ID: {best['gw_id']}")
+        else:
+            print("\n❌ Nessun gateway online")
+
+
 
     # ============================================================
     # 4. COMANDI PRINCIPALI
@@ -1914,9 +2037,9 @@ class WalletCLI:
         # ============================================================
         if has_radio:
             print_bold(f"\n🔍 PEER ORDINATI PER PERFORMANCE ({len(peers_sorted)})")
-            print("=" * 230)
-            print(f"{'#':<3} {'Nome':<14} {'Score':<6} {'Rel':<6} {'Rep':<4} {'Hops':<5} {'RTT':<8} {'RSSI':<10} {'SNR':<10} {'XRP':<14} {'Stellar':<14} {'Internet':<9} {'Ultimo visto':<15} {'Assets'}")
-            print("-" * 230)
+            print("=" * 260)
+            print(f"{'#':<3} {'Nome':<14} {'Score':<6} {'Rel':<6} {'Rep':<4} {'Hops':<5} {'RTT':<8} {'RSSI':<10} {'SNR':<10} {'XRP':<14} {'Stellar':<14} {'Internet':<9} {'Ultimo visto':<15} {'ID':<36} {'Assets'}")
+            print("-" * 260)
             
             for idx, p in enumerate(peers_sorted, 1):
                 sc = calculate_score(p)
@@ -1968,6 +2091,7 @@ class WalletCLI:
                 
                 internet = "🌐" if p.get('has_internet') else "📡"
                 last_seen = self._format_time_ago(p.get('last_seen'))
+                gw_id = p.get('gateway_id', 'N/A')
                 
                 assets = p.get('assets', [])
                 if isinstance(assets, list):
@@ -1981,16 +2105,16 @@ class WalletCLI:
                 sc_color = Colors.GREEN if sc > 70 else Colors.YELLOW if sc > 40 else Colors.RED
                 rel_color = Colors.GREEN if rel > 0.9 else Colors.YELLOW if rel > 0.7 else Colors.RED
                 
-                print(f"{idx:<3} {name:<14} {sc_color}{sc:5.0f}{Colors.RESET} {rel_color}{rel:5.2f}{Colors.RESET} {rep:<4} {hops:<5} {rtt:<8} {rssi_str:<10} {snr_str:<10} {xrp_str:<14} {stellar_str:<14} {internet:<9} {last_seen:<15} {assets_str}")
+                print(f"{idx:<3} {name:<14} {sc_color}{sc:5.0f}{Colors.RESET} {rel_color}{rel:5.2f}{Colors.RESET} {rep:<4} {hops:<5} {rtt:<8} {rssi_str:<10} {snr_str:<10} {xrp_str:<14} {stellar_str:<14} {internet:<9} {last_seen:<15} {gw_id:<36} {assets_str}")
         
         # ============================================================
         # STAMPA SENZA RADIO
         # ============================================================
         else:
             print_bold(f"\n🔍 PEER ORDINATI PER PERFORMANCE ({len(peers_sorted)})")
-            print("=" * 200)
-            print(f"{'#':<3} {'Nome':<16} {'Score':<6} {'Rel':<6} {'Rep':<4} {'Hops':<5} {'RTT':<8} {'XRP':<14} {'Stellar':<14} {'Internet':<9} {'Ultimo visto':<15} {'Assets'}")
-            print("-" * 200)
+            print("=" * 230)
+            print(f"{'#':<3} {'Nome':<16} {'Score':<6} {'Rel':<6} {'Rep':<4} {'Hops':<5} {'RTT':<8} {'XRP':<14} {'Stellar':<14} {'Internet':<9} {'Ultimo visto':<15} {'ID':<36} {'Assets'}")
+            print("-" * 230)
             
             for idx, p in enumerate(peers_sorted, 1):
                 sc = calculate_score(p)
@@ -2016,6 +2140,7 @@ class WalletCLI:
                 
                 internet = "🌐" if p.get('has_internet') else "📡"
                 last_seen = self._format_time_ago(p.get('last_seen'))
+                gw_id = p.get('gateway_id', 'N/A')
                 
                 assets = p.get('assets', [])
                 if isinstance(assets, list):
@@ -2029,12 +2154,12 @@ class WalletCLI:
                 sc_color = Colors.GREEN if sc > 70 else Colors.YELLOW if sc > 40 else Colors.RED
                 rel_color = Colors.GREEN if rel > 0.9 else Colors.YELLOW if rel > 0.7 else Colors.RED
                 
-                print(f"{idx:<3} {name:<16} {sc_color}{sc:5.0f}{Colors.RESET} {rel_color}{rel:5.2f}{Colors.RESET} {rep:<4} {hops:<5} {rtt:<8} {xrp_str:<14} {stellar_str:<14} {internet:<9} {last_seen:<15} {assets_str}")
+                print(f"{idx:<3} {name:<16} {sc_color}{sc:5.0f}{Colors.RESET} {rel_color}{rel:5.2f}{Colors.RESET} {rep:<4} {hops:<5} {rtt:<8} {xrp_str:<14} {stellar_str:<14} {internet:<9} {last_seen:<15} {gw_id:<36} {assets_str}")
         
         # ============================================================
         # LINEA FINALE
         # ============================================================
-        print("=" * (230 if has_radio else 200))
+        print("=" * (260 if has_radio else 230))
         
         # ============================================================
         # STATISTICHE
@@ -2198,7 +2323,6 @@ class WalletCLI:
             except Exception as e:
                 print_red(f"❌ Errore durante l'invio: {e}")
 
-
     def _reticulum_request_info(self):
         """Richiedi info a un gateway specifico"""
         if not self.metrics:
@@ -2327,9 +2451,6 @@ def interactive_mode():
     cli.init()
     cli._interactive_mode = True
     
-    # Reticulum è già inizializzato all'avvio
-    gateway_active = False
-    
     print_bold("\n" + "=" * 60)
     print_bold("    💰 WALLET CLI - MODALITÀ INTERATTIVA")
     print_bold("=" * 60)
@@ -2339,21 +2460,18 @@ def interactive_mode():
     try:
         while True:
             print("\n" + "-" * 40)
-            print("  1) Crea wallet")
-            print("  2) Importa wallet")
-            print("  3) Mostra saldo")
-            print("  4) Mostra indirizzo")
-            print("  5) Deriva indirizzi")
-            print("  6) Invia pagamento")
-            print("  7) Info wallet")
-            print("  8) Storico")
-            print("  9) Fund testnet (XLM)")
-            print(" 10) Esporta")
-            print(" 11) Lista wallet")
-            print(" 12) Cambia wallet")
-            print(" 13) Trustline")
-            print(" 14) Invia token")
-            print(" 15) Reticulum")
+            print("  1) Wallet")
+            print("  2) Mostra saldo")
+            print("  3) Mostra indirizzo")
+            print("  4) Deriva indirizzi")
+            print("  5) Invia pagamento")
+            print("  6) Info wallet")
+            print("  7) Storico")
+            print("  8) Fund testnet (XLM)")
+            print("  9) Esporta")
+            print(" 10) Trustline")
+            print(" 11) Invia token")
+            print(" 12) Reticulum")
             print("  0) Esci")
             
             # Mostra stato Reticulum
@@ -2375,72 +2493,135 @@ def interactive_mode():
                 print_green("👋 Arrivederci!")
                 break
             
+            # ============================================================
+            # 1) WALLET - SOTTOMENU
+            # ============================================================
             elif choice == '1':
-                name = input("Nome (default): ").strip() or "default"
-                crypto = input("Crypto (XRP/XLM): ").strip().upper() or "XRP"
-                network = input("Rete (testnet/mainnet): ").strip().lower() or "testnet"
-                cli.cmd_create(name, crypto, network)
+                while True:
+                    # Mostra wallet attivo e lista
+                    active = cli._get_active_wallet_name()
+                    wallets = cli._get_wallet_list()
+                    
+                    print("\n" + "=" * 50)
+                    print("  📂 WALLET")
+                    print("=" * 50)
+                    print(f"  Wallet attivo: {active or 'NESSUNO'}")
+                    print("\n  📋 Lista wallet:")
+                    if wallets:
+                        for i, w in enumerate(wallets, 1):
+                            marker = "▶" if w["name"] == active else " "
+                            print(f"    {i}. {marker} {w['name']} ({w.get('crypto', 'XRP')} - {w.get('network', 'testnet')})")
+                    else:
+                        print("    ❌ Nessun wallet salvato")
+                    
+                    print("\n" + "-" * 50)
+                    print("  1) Crea wallet")
+                    print("  2) Importa wallet")
+                    print("  3) Rimuovi wallet")
+                    print("  4) Cambia wallet")
+                    print("  0) Torna al menu principale")
+                    print("-" * 50)
+                    
+                    sub = input("\nScelta: ").strip()
+                    
+                    if sub == '0':
+                        break
+                    elif sub == '1':
+                        name = input("Nome (default): ").strip() or "default"
+                        crypto = input("Crypto (XRP/XLM): ").strip().upper() or "XRP"
+                        network = input("Rete (testnet/mainnet): ").strip().lower() or "testnet"
+                        cli.cmd_create(name, crypto, network)
+                    elif sub == '2':
+                        seed = input("Inserisci seed/mnemonic/numeri: ").strip()
+                        if seed:
+                            name = input("Nome (imported): ").strip() or "imported"
+                            crypto = input("Crypto (auto/XRP/XLM): ").strip().upper() or "auto"
+                            network = input("Rete (testnet/mainnet): ").strip().lower() or "testnet"
+                            cli.cmd_import(seed, name, crypto, network)
+                    elif sub == '3':
+                        cli.cmd_remove_wallet()
+                    elif sub == '4':
+                        name = input("Nome wallet: ").strip()
+                        if name:
+                            cli.cmd_switch(name)
+                    else:
+                        print_red("❌ Scelta non valida")
             
+            # ============================================================
+            # 2) MOSTRA SALDO
+            # ============================================================
             elif choice == '2':
-                seed = input("Inserisci seed/mnemonic/numeri: ").strip()
-                if seed:
-                    name = input("Nome (imported): ").strip() or "imported"
-                    crypto = input("Crypto (auto/XRP/XLM): ").strip().upper() or "auto"
-                    network = input("Rete (testnet/mainnet): ").strip().lower() or "testnet"
-                    cli.cmd_import(seed, name, crypto, network)
-            
-            elif choice == '3':
                 cli.cmd_balance(True)
             
-            elif choice == '4':
+            # ============================================================
+            # 3) MOSTRA INDIRIZZO
+            # ============================================================
+            elif choice == '3':
                 cli.cmd_address()
             
-            elif choice == '5':
+            # ============================================================
+            # 4) DERIVA INDIRIZZI
+            # ============================================================
+            elif choice == '4':
                 keyword = input("Keyword (default): ").strip() or "default"
                 count = int(input("Numero (5): ").strip() or "5")
                 cli.cmd_derive(keyword, count)
             
-            elif choice == '6':
+            # ============================================================
+            # 5) INVIA PAGAMENTO
+            # ============================================================
+            elif choice == '5':
                 to_addr = input("Indirizzo destinatario: ").strip()
-                amount = float(input("Ammontare: ").strip())
+                try:
+                    amount = float(input("Ammontare: ").strip())
+                except ValueError:
+                    print_red("❌ Ammontare non valido")
+                    continue
                 memo = input("Memo: ").strip()
                 if to_addr and amount > 0:
                     cli.cmd_send(to_addr, amount, memo)
                 else:
                     print_red("❌ Dati non validi")
             
-            elif choice == '7':
+            # ============================================================
+            # 6) INFO WALLET
+            # ============================================================
+            elif choice == '6':
                 cli.cmd_info()
             
-            elif choice == '8':
+            # ============================================================
+            # 7) STORICO
+            # ============================================================
+            elif choice == '7':
                 limit = int(input("Numero transazioni (10): ").strip() or "10")
                 cli.cmd_history(limit)
             
-            elif choice == '9':
+            # ============================================================
+            # 8) FUND TESTNET
+            # ============================================================
+            elif choice == '8':
                 cli.cmd_fund_testnet()
             
-            elif choice == '10':
+            # ============================================================
+            # 9) ESPORTA
+            # ============================================================
+            elif choice == '9':
                 private = input("Includi chiave privata? (s/N): ").strip().lower() == 's'
                 cli.cmd_export(private)
             
-            elif choice == '11':
-                cli.cmd_list_wallets()
-            
-            elif choice == '12':
-                name = input("Nome wallet: ").strip()
-                if name:
-                    cli.cmd_switch(name)
-            
-            elif choice == '13':
+            # ============================================================
+            # 10) TRUSTLINE
+            # ============================================================
+            elif choice == '10':
                 print("\n🔗 GESTIONE TRUSTLINE")
                 print("  1) Mostra trustline")
                 print("  2) Crea trustline")
                 print("  3) Rimuovi trustline")
                 print("  4) Info trustline")
-                sub_choice = input("Scelta: ").strip()
-                if sub_choice == '1':
+                sub = input("Scelta: ").strip()
+                if sub == '1':
                     cli.cmd_trustlines(["--refresh"])
-                elif sub_choice == '2':
+                elif sub == '2':
                     asset = input("Asset (es. RLUSD): ").strip()
                     issuer = input("Issuer address: ").strip()
                     limit = input("Limite (0 per rimuovere): ").strip()
@@ -2450,21 +2631,27 @@ def interactive_mode():
                     else:
                         args.append("0")
                     cli.cmd_trustline_set(args)
-                elif sub_choice == '3':
+                elif sub == '3':
                     asset = input("Asset: ").strip()
                     issuer = input("Issuer address: ").strip()
                     cli.cmd_trustline_remove([asset, issuer])
-                elif sub_choice == '4':
+                elif sub == '4':
                     asset = input("Asset: ").strip()
                     issuer = input("Issuer (opzionale): ").strip()
                     cli.cmd_trustline_info([asset] + ([issuer] if issuer else []))
             
-            elif choice == '14':
+            # ============================================================
+            # 11) INVIA TOKEN
+            # ============================================================
+            elif choice == '11':
                 to_addr = input("Indirizzo destinatario: ").strip()
                 token = input("Nome token (es. Arg0): ").strip()
-                amount = float(input("Ammontare: ").strip())
+                try:
+                    amount = float(input("Ammontare: ").strip())
+                except ValueError:
+                    print_red("❌ Ammontare non valido")
+                    continue
                 issuer = input("Issuer (opzionale, invio per wallet corrente): ").strip()
-                
                 if to_addr and token and amount:
                     args = ["--to", to_addr, "--token", token, "--amount", str(amount)]
                     if issuer:
@@ -2473,59 +2660,81 @@ def interactive_mode():
                 else:
                     print_red("❌ Dati non validi")
             
-            elif choice == '15':
-                print("\n🌐 GESTIONE RETICULUM")
-                print("  1) Stato")
-                print("  2) Avvia gateway")
-                print("  3) Ferma gateway")
-                print("  4) Scopri gateway")
-                print("  5) Scopri wallet")
-                print("  6) Peer metriche")
-                print("  7) Miglior gateway")
-                print("  8) Richiedi info gateway")
-                print("  9) Invia transazione")
-                sub_choice = input("Scelta: ").strip()
-                
-                if sub_choice == '1':
-                    cli._reticulum_gateway_status()
-                elif sub_choice == '2':
-                    cli._reticulum_gateway_start()
-                elif sub_choice == '3':
-                    cli._reticulum_gateway_stop()
-                elif sub_choice == '4':
-                    cli._reticulum_discover()
-                elif sub_choice == '5':
-                    cli._reticulum_discover_wallets()
-                elif sub_choice == '6':
-                    cli._reticulum_peers()
-                elif sub_choice == '7':
-                    asset = input("Asset (es. RLUSD): ").strip()
-                    if asset:
-                        cli._reticulum_best_gateway(asset)
+            # ============================================================
+            # 12) RETICULUM - SOTTOMENU
+            # ============================================================
+            elif choice == '12':
+                while True:
+                    print("\n" + "=" * 50)
+                    print("  📡 RETICULUM")
+                    print("=" * 50)
+                    
+                    if cli.reticulum:
+                        status = cli.reticulum.get_status()
+                        gw_status = "✅ Attivo" if status.get('is_gateway') else "❌ Fermo"
+                        peers = cli.metrics.get_all_peers() if cli.metrics else []
+                        print(f"\n  Gateway: {gw_status}")
+                        print(f"  Peer conosciuti: {len(peers)}")
+                    
+                    print("\n" + "-" * 50)
+                    print("  1) Stato gateway")
+                    print("  2) Avvia gateway")
+                    print("  3) Ferma gateway")
+                    print("  4) Scopri gateway")
+                    print("  5) Scopri wallet")
+                    print("  6) Peer metriche")
+                    print("  7) Miglior gateway")
+                    print("  8) Richiedi info gateway")
+                    print("  9) Invia transazione")
+                    print(" 10) Testa tutti i gateway")
+                    print("  0) Torna al menu principale")
+                    print("-" * 50)
+                    
+                    sub = input("\nScelta: ").strip()
+                    
+                    if sub == '0':
+                        break
+                    elif sub == '1':
+                        cli._reticulum_gateway_status()
+                    elif sub == '2':
+                        cli._reticulum_gateway_start()
+                    elif sub == '3':
+                        cli._reticulum_gateway_stop()
+                    elif sub == '4':
+                        cli._reticulum_discover()
+                    elif sub == '5':
+                        cli._reticulum_discover_wallets()
+                    elif sub == '6':
+                        cli._reticulum_peers()
+                    elif sub == '7':
+                        asset = input("Asset (es. RLUSD): ").strip()
+                        if asset:
+                            cli._reticulum_best_gateway(asset)
+                        else:
+                            print_red("❌ Specifica un asset")
+                    elif sub == '8':
+                        cli._reticulum_request_info()
+                    elif sub == '9':
+                        to_addr = input("Indirizzo destinatario: ").strip()
+                        if len(to_addr) < 20:
+                            print_red("❌ Indirizzo troppo corto (minimo 20 caratteri)")
+                        else:
+                            try:
+                                amount = float(input("Ammontare: ").strip())
+                                if amount <= 0:
+                                    print_red("❌ L'ammontare deve essere maggiore di 0")
+                                else:
+                                    asset = input("Asset (XRP): ").strip() or "XRP"
+                                    cli._reticulum_send(["--to", to_addr, "--amount", str(amount), "--asset", asset])
+                            except ValueError:
+                                print_red("❌ Ammontare non valido")
+                    elif sub == '10':
+                        cli.cmd_test_gateways()
                     else:
-                        print_red("❌ Specifica un asset")
-                elif sub_choice == '8':
-                    cli._reticulum_request_info()
-                elif sub_choice == '9':
-                    to_addr = input("Indirizzo destinatario: ").strip()
-                    if len(to_addr) < 20:
-                        print_red("❌ Indirizzo troppo corto (minimo 20 caratteri)")
-                        continue  # <-- TORNA AL MENU, NON ESCE
-                    try:
-                        amount = float(input("Ammontare: ").strip())
-                        if amount <= 0:
-                            print_red("❌ L'ammontare deve essere maggiore di 0")
-                            continue
-                    except ValueError:
-                        print_red("❌ Ammontare non valido")
-                        continue
-                    asset = input("Asset (XRP): ").strip() or "XRP"
-                    if to_addr and amount:
-                        cli._reticulum_send(["--to", to_addr, "--amount", str(amount), "--asset", asset])
-                    else:
-                        print_red("❌ Dati non validi")
-                else:
-                    print_red("❌ Scelta non valida")
+                        print_red("❌ Scelta non valida")
+            
+            else:
+                print_red("❌ Scelta non valida")
     
     except KeyboardInterrupt:
         print("\n")
