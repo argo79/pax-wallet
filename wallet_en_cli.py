@@ -766,6 +766,24 @@ class WalletCLI:
         if not self._validate_wallet_name(name):
             return None
         
+        # ============================================================
+        # 🔥 VALIDA CRYPTO
+        # ============================================================
+        crypto = crypto.upper()
+        if crypto not in ["XRP", "XLM"]:
+            print_red(f"❌ Crypto non supportata: {crypto}")
+            print_yellow("   Usa XRP o XLM")
+            return None
+        
+        # ============================================================
+        # 🔥 VALIDA RETE
+        # ============================================================
+        network = network.lower()
+        if network not in ["testnet", "mainnet", "devnet"]:
+            print_red(f"❌ Rete non supportata: {network}")
+            print_yellow("   Usa: testnet, mainnet o devnet")
+            return None
+        
         print_blue(f"📤 Creating {crypto} wallet on {network.upper()}...")
         
         manager = self.wallet._xrp_manager
@@ -792,7 +810,7 @@ class WalletCLI:
             print_cyan("   🔐 Using 24 words (maximum security)")
         
         # ============================================================
-        # 🔥 CHIEDE PASSPHRASE (OSCURATA) - SENZA y/N
+        # 🔥 CHIEDE PASSPHRASE (OSCURATA)
         # ============================================================
         print("")
         print("   🔐 Passphrase (optional, press Enter to skip):")
@@ -825,9 +843,6 @@ class WalletCLI:
             print(f"   Passphrase: {'*' * len(passphrase)}")
         print(f"   Seed: {result.get('seed', 'N/A')}")
         
-        # ============================================================
-        # 🔥 AVVERTENZA SULLA PASSPHRASE
-        # ============================================================
         if passphrase:
             print("")
             print_yellow("   ⚠️ WARNING: The passphrase is NOT stored in the wallet!")
@@ -845,6 +860,15 @@ class WalletCLI:
             self.init(network)
         
         if not self._validate_wallet_name(name):
+            return None
+        
+        # ============================================================
+        # 🔥 VALIDA RETE
+        # ============================================================
+        network = network.lower()
+        if network not in ["testnet", "mainnet", "devnet"]:
+            print_red(f"❌ Rete non supportata: {network}")
+            print_yellow("   Usa: testnet, mainnet o devnet")
             return None
         
         try:
@@ -867,7 +891,12 @@ class WalletCLI:
             
             crypto_param = None
             if crypto and crypto.lower() != "auto":
-                crypto_param = crypto
+                crypto_param = crypto.upper()
+                # 🔥 VALIDA CRYPTO
+                if crypto_param not in ["XRP", "XLM"]:
+                    print_red(f"❌ Crypto non supportata: {crypto_param}")
+                    print_yellow("   Usa XRP, XLM o auto")
+                    return None
             
             # ============================================================
             # 🔥 SE MNEMONICA, CHIEDI PASSPHRASE (OSCURATA)
