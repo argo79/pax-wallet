@@ -76,19 +76,21 @@ class UnifiedWallet:
     # IDENTITA'
     # ============================================================
     
-    def create_wallet(self, name: str = None, crypto_type: str = "XRP", strength: int = 256) -> Dict[str, Any]:
-        """Crea un nuovo wallet con strength (128=12 parole, 256=24 parole)"""
+    def create_wallet(self, name: str = None, crypto_type: str = "XRP", strength: int = 256, passphrase: str = "") -> Dict[str, Any]:
+        """Crea un nuovo wallet con strength (128=12 parole, 256=24 parole) e passphrase opzionale"""
         identity_id = self.core.create_identity(name)
         
         if not self._xrp_manager:
             self.init_xrp(crypto=crypto_type)
         
         if crypto_type == "XRP":
-            wallet_data = self._xrp_manager.create_new_wallet_bip39(strength=strength)
+            # 🔥 PASSA PASSPHRASE
+            wallet_data = self._xrp_manager.create_new_wallet_bip39(passphrase=passphrase, strength=strength)
             self._xrp_manager.save()
         elif crypto_type == "XLM":
             self._xrp_manager.set_crypto("XLM")
-            wallet_data = self._xrp_manager.create_new_wallet_stellar(strength=strength)
+            # 🔥 PASSA PASSPHRASE (se supportata da Stellar)
+            wallet_data = self._xrp_manager.create_new_wallet_stellar(passphrase=passphrase, strength=strength)
             self._xrp_manager.save()
         else:
             raise ValueError(f"Crypto non supportata: {crypto_type}")
@@ -100,12 +102,15 @@ class UnifiedWallet:
             "mnemonic": wallet_data.get("seed_phrase"),
             "word_count": len(wallet_data.get("seed_phrase", "").split()),
             "seed": wallet_data.get("first_seed_xrp") or wallet_data.get("first_seed_stellar"),
+            "passphrase": passphrase if passphrase else None,
             "wallet_data": wallet_data
         }
     
     def import_wallet(self, seed_input: Union[str, List[str]], 
                       name: str = None,
-                      crypto_type: str = "auto") -> Dict[str, Any]:
+                      crypto_type: str = "auto",
+                      passphrase: str = "") -> Dict[str, Any]:
+        """Importa un wallet con passphrase opzionale"""
         identity_id = self.core.create_identity(name)
         
         if not self._xrp_manager:
@@ -120,7 +125,11 @@ class UnifiedWallet:
         else:
             self._xrp_manager.set_crypto(crypto_type)
         
-        result = self._xrp_manager.import_wallet(seed_input)
+        # 🔥 PASSA PASSPHRASE ALL'IMPORT
+        if passphrase:
+            result = self._xrp_manager.import_wallet(seed_input, passphrase=passphrase)
+        else:
+            result = self._xrp_manager.import_wallet(seed_input)
         self._xrp_manager.save()
         
         return {
@@ -128,6 +137,7 @@ class UnifiedWallet:
             "crypto_type": self._xrp_manager.crypto_type,
             "address": result.get("first_address"),
             "seed_type": result.get("seed_type"),
+            "passphrase": passphrase if passphrase else None,
             "wallet_data": result
         }
     
