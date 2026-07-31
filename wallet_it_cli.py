@@ -1736,52 +1736,76 @@ class WalletCLI:
         print("=" * 60)
 
     def _reticulum_discover(self):
-        """Cerca gateway"""
+        """Cerca gateway - mostra TUTTI quelli in cache con first_seen e last_seen"""
         if not self.reticulum:
             print_red("❌ Reticulum non inizializzato")
             return
         
         print_blue("🔍 Ricerca gateway Reticulum...")
+        
+        # Ottieni gateway dalla cache (TUTTI, non solo quelli attivi)
         gateways = self.reticulum.discover_gateways()
         
         print_bold(f"\n🔍 GATEWAY TROVATI ({len(gateways)})")
-        print("=" * 60)
+        print("=" * 100)
+        
         if gateways:
+            print(f"{'Nome':<20} {'Hash':<36} {'First Seen':<20} {'Last Seen':<20} {'Hops':<6}")
+            print("-" * 100)
+            
             for gw in gateways:
-                print(f"   Nome: {gw.get('name', 'Sconosciuto')}")
-                print(f"   Hash: {gw.get('gateway_id', '?')}")
+                name = gw.get('name', 'Sconosciuto')[:18]
+                gw_id = gw.get('gateway_id', '?')
+                first_seen = gw.get('first_seen')
                 last_seen = gw.get('last_seen')
-                if last_seen:
-                    seen_str = time.strftime('%H:%M:%S', time.localtime(last_seen))
-                    print(f"   Ultimo visto: {seen_str}")
-                print("-" * 40)
+                
+                first_str = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(first_seen)) if first_seen else 'Mai'
+                last_str = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(last_seen)) if last_seen else 'Mai'
+                hops = gw.get('hops', '?')
+                
+                print(f"{name:<20} {gw_id:<36} {first_str:<20} {last_str:<20} {hops:<6}")
+            
+            print("=" * 100)
+            print(f"Totale: {len(gateways)} gateway in cache")
         else:
-            print("   ❌ Nessun gateway trovato")
-        print("=" * 60)
+            print("   ❌ Nessun gateway trovato in cache")
+        print("=" * 100)
 
     def _reticulum_discover_wallets(self):
-        """Cerca wallet"""
+        """Cerca wallet - mostra TUTTI quelli in cache con first_seen e last_seen"""
         if not self.reticulum:
             print_red("❌ Reticulum non inizializzato")
             return
         
         print_blue("🔍 Ricerca wallet Reticulum...")
+        
+        # Ottieni wallet dalla cache (TUTTI, non solo quelli attivi)
         wallets = self.reticulum.discover_wallets()
         
         print_bold(f"\n🔍 WALLET TROVATI ({len(wallets)})")
-        print("=" * 60)
+        print("=" * 100)
+        
         if wallets:
+            print(f"{'Nome':<20} {'Hash':<36} {'First Seen':<20} {'Last Seen':<20} {'Hops':<6}")
+            print("-" * 100)
+            
             for w in wallets:
-                print(f"   Nome: {w.get('name', 'Sconosciuto')}")
-                print(f"   Hash: {w.get('wallet_id', '?')}")
+                name = w.get('name', 'Sconosciuto')[:18]
+                w_id = w.get('wallet_id', '?')
+                first_seen = w.get('first_seen')
                 last_seen = w.get('last_seen')
-                if last_seen:
-                    seen_str = time.strftime('%H:%M:%S', time.localtime(last_seen))
-                    print(f"   Ultimo visto: {seen_str}")
-                print("-" * 40)
+                
+                first_str = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(first_seen)) if first_seen else 'Mai'
+                last_str = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(last_seen)) if last_seen else 'Mai'
+                hops = w.get('hops', '?')
+                
+                print(f"{name:<20} {w_id:<36} {first_str:<20} {last_str:<20} {hops:<6}")
+            
+            print("=" * 100)
+            print(f"Totale: {len(wallets)} wallet in cache")
         else:
-            print("   ❌ Nessun wallet trovato")
-        print("=" * 60)
+            print("   ❌ Nessun wallet trovato in cache")
+        print("=" * 100)
 
     def _reticulum_peers(self):
         if not self.metrics:
@@ -1794,24 +1818,106 @@ class WalletCLI:
             print_yellow("⚠️ Nessun peer conosciuto")
             return
         
-        # Verifica se ci sono dati radio
+        # ============================================================
+        # CALCOLA PUNTEGGIO PERFORMANCE
+        # ============================================================
+        def calculate_score(p):
+            score = 0.0
+            
+            # Affidabilità (Rel) - peso 40
+            rel = p.get('reliability', 0)
+            score += rel * 40
+            
+            # Reputazione - peso 0.3
+            rep = p.get('reputation', 50)
+            score += rep * 0.3
+            
+            # Latenza RTT (minore è meglio)
+            latency = p.get('latency_ms')
+            if latency and latency > 0:
+                if latency < 50:
+                    score += 15
+                elif latency < 100:
+                    score += 10
+                elif latency < 200:
+                    score += 5
+                elif latency < 500:
+                    score -= 5
+                else:
+                    score -= 15
+            
+            # Hops (meno hop = meglio)
+            hops = p.get('hops')
+            if hops:
+                if hops == 1:
+                    score += 10
+                elif hops == 2:
+                    score += 5
+                elif hops == 3:
+                    score += 0
+                else:
+                    score -= hops * 2
+            
+            # XRP raggiungibile
+            if p.get('xrp_reachable'):
+                score += 5
+                xrp_lat = p.get('xrp_latency_ms')
+                if xrp_lat and xrp_lat < 200:
+                    score += 5
+                elif xrp_lat and xrp_lat < 500:
+                    score += 2
+            
+            # Stellar raggiungibile
+            if p.get('stellar_reachable'):
+                score += 5
+                stellar_lat = p.get('stellar_latency_ms')
+                if stellar_lat and stellar_lat < 200:
+                    score += 5
+                elif stellar_lat and stellar_lat < 500:
+                    score += 2
+            
+            # Internet
+            if p.get('has_internet'):
+                score += 3
+            
+            # RSSI (se disponibile)
+            rssi = p.get('rssi')
+            if rssi is not None:
+                if rssi > -60:
+                    score += 5
+                elif rssi > -80:
+                    score += 2
+                elif rssi < -100:
+                    score -= 5
+            
+            return max(0, min(100, score))
+        
+        # ============================================================
+        # ORDINA PER PUNTEGGIO (dal migliore al peggiore)
+        # ============================================================
+        peers_sorted = sorted(peers, key=calculate_score, reverse=True)
+        
+        # ============================================================
+        # VERIFICA SE CI SONO DATI RADIO
+        # ============================================================
         has_radio = any(p.get('rssi') is not None or p.get('snr') is not None for p in peers)
         
+        # ============================================================
+        # STAMPA CON RADIO
+        # ============================================================
         if has_radio:
-            print_bold(f"\n🔍 PEER CONOSCIUTI ({len(peers)})")
-            print("=" * 210)
-            print(f"{'Nome':<16} {'ID':<34} {'Hops':<6} {'RTT':<10} {'RSSI':<10} {'SNR':<10} {'XRP':<14} {'Stellar':<14} {'Rep':<5} {'Internet':<9} {'Ultimo visto':<15} {'Assets'}")
-            print("-" * 210)
+            print_bold(f"\n🔍 PEER ORDINATI PER PERFORMANCE ({len(peers_sorted)})")
+            print("=" * 230)
+            print(f"{'#':<3} {'Nome':<14} {'Score':<6} {'Rel':<6} {'Rep':<4} {'Hops':<5} {'RTT':<8} {'RSSI':<10} {'SNR':<10} {'XRP':<14} {'Stellar':<14} {'Internet':<9} {'Ultimo visto':<15} {'Assets'}")
+            print("-" * 230)
             
-            for p in peers:
-                name = str(p.get('name', 'UNKNOWN'))[:14]
-                gid = str(p.get('gateway_id', 'N/A'))[:32]
-                
-                hops = p.get('hops')
-                hops_str = str(hops) if hops is not None else '?'
-                
-                latency = p.get('latency_ms')
-                latency_str = f"{latency}ms" if latency is not None else '?ms'
+            for idx, p in enumerate(peers_sorted, 1):
+                sc = calculate_score(p)
+                name = str(p.get('name', 'UNKNOWN'))[:12]
+                rel = p.get('reliability', 0)
+                rep = p.get('reputation', 50)
+                hops = str(p.get('hops', '?'))
+                rtt = f"{p.get('latency_ms', '?')}ms"
                 
                 # RSSI
                 rssi = p.get('rssi')
@@ -1840,87 +1946,21 @@ class WalletCLI:
                     snr_str = 'N/A'
                 
                 # XRP
-                xrp_reachable = p.get('xrp_reachable', False)
-                xrp_latency = p.get('xrp_latency_ms')
-                if xrp_reachable and xrp_latency:
-                    xrp_str = f"✅{xrp_latency}ms"
-                elif xrp_reachable:
-                    xrp_str = "✅ OK"
+                if p.get('xrp_reachable'):
+                    xrp_lat = p.get('xrp_latency_ms')
+                    xrp_str = f"✅{xrp_lat}ms" if xrp_lat else "✅ OK"
                 else:
                     xrp_str = "❌"
                 
                 # Stellar
-                stellar_reachable = p.get('stellar_reachable', False)
-                stellar_latency = p.get('stellar_latency_ms')
-                if stellar_reachable and stellar_latency:
-                    stellar_str = f"✅{stellar_latency}ms"
-                elif stellar_reachable:
-                    stellar_str = "✅ OK"
+                if p.get('stellar_reachable'):
+                    stellar_lat = p.get('stellar_latency_ms')
+                    stellar_str = f"✅{stellar_lat}ms" if stellar_lat else "✅ OK"
                 else:
                     stellar_str = "❌"
                 
-                rep = str(p.get('reputation', 50))
-                internet_icon = "🌐" if p.get('has_internet', False) else "📡"
-                
-                # ============================================================
-                # ULTIMO VISTO - FORMATTATO
-                # ============================================================
-                last_seen = p.get('last_seen')
-                last_seen_str = self._format_time_ago(last_seen)
-                
-                assets = p.get('assets', [])
-                if isinstance(assets, list):
-                    assets_str = ', '.join(assets[:2])
-                    if len(assets) > 2:
-                        assets_str += f" +{len(assets)-2}"
-                else:
-                    assets_str = str(assets)[:15]
-                
-                print(f"{name:<16} {gid:<34} {hops_str:<6} {latency_str:<10} {rssi_str:<10} {snr_str:<10} {xrp_str:<14} {stellar_str:<14} {rep:<5} {internet_icon:<9} {last_seen_str:<15} {assets_str}")
-        else:
-            # Visualizzazione standard senza radio
-            print_bold(f"\n🔍 PEER CONOSCIUTI ({len(peers)})")
-            print("=" * 180)
-            print(f"{'Nome':<18} {'ID':<36} {'Hops':<6} {'RTT':<10} {'XRP':<14} {'Stellar':<14} {'Rep':<5} {'Rel':<6} {'Internet':<9} {'Ultimo visto':<15} {'Assets'}")
-            print("-" * 180)
-            
-            for p in peers:
-                name = str(p.get('name', 'UNKNOWN'))[:16]
-                gid = str(p.get('gateway_id', 'N/A'))[:34]
-                
-                hops = p.get('hops')
-                hops_str = str(hops) if hops is not None else '?'
-                
-                latency = p.get('latency_ms')
-                latency_str = f"{latency}ms" if latency is not None else '?ms'
-                
-                xrp_reachable = p.get('xrp_reachable', False)
-                xrp_latency = p.get('xrp_latency_ms')
-                if xrp_reachable and xrp_latency:
-                    xrp_str = f"✅{xrp_latency}ms"
-                elif xrp_reachable:
-                    xrp_str = "✅ OK"
-                else:
-                    xrp_str = "❌"
-                
-                stellar_reachable = p.get('stellar_reachable', False)
-                stellar_latency = p.get('stellar_latency_ms')
-                if stellar_reachable and stellar_latency:
-                    stellar_str = f"✅{stellar_latency}ms"
-                elif stellar_reachable:
-                    stellar_str = "✅ OK"
-                else:
-                    stellar_str = "❌"
-                
-                rep = str(p.get('reputation', 50))
-                rel = f"{p.get('reliability', 0):.2f}" if p.get('reliability') else '0.00'
-                internet_icon = "🌐" if p.get('has_internet', False) else "📡"
-                
-                # ============================================================
-                # ULTIMO VISTO - FORMATTATO
-                # ============================================================
-                last_seen = p.get('last_seen')
-                last_seen_str = self._format_time_ago(last_seen)
+                internet = "🌐" if p.get('has_internet') else "📡"
+                last_seen = self._format_time_ago(p.get('last_seen'))
                 
                 assets = p.get('assets', [])
                 if isinstance(assets, list):
@@ -1930,11 +1970,68 @@ class WalletCLI:
                 else:
                     assets_str = str(assets)[:20]
                 
-                print(f"{name:<18} {gid:<36} {hops_str:<6} {latency_str:<10} {xrp_str:<14} {stellar_str:<14} {rep:<5} {rel:<6} {internet_icon:<9} {last_seen_str:<15} {assets_str}")
+                # Colori
+                sc_color = Colors.GREEN if sc > 70 else Colors.YELLOW if sc > 40 else Colors.RED
+                rel_color = Colors.GREEN if rel > 0.9 else Colors.YELLOW if rel > 0.7 else Colors.RED
+                
+                print(f"{idx:<3} {name:<14} {sc_color}{sc:5.0f}{Colors.RESET} {rel_color}{rel:5.2f}{Colors.RESET} {rep:<4} {hops:<5} {rtt:<8} {rssi_str:<10} {snr_str:<10} {xrp_str:<14} {stellar_str:<14} {internet:<9} {last_seen:<15} {assets_str}")
         
-        print("=" * 180)
+        # ============================================================
+        # STAMPA SENZA RADIO
+        # ============================================================
+        else:
+            print_bold(f"\n🔍 PEER ORDINATI PER PERFORMANCE ({len(peers_sorted)})")
+            print("=" * 200)
+            print(f"{'#':<3} {'Nome':<16} {'Score':<6} {'Rel':<6} {'Rep':<4} {'Hops':<5} {'RTT':<8} {'XRP':<14} {'Stellar':<14} {'Internet':<9} {'Ultimo visto':<15} {'Assets'}")
+            print("-" * 200)
+            
+            for idx, p in enumerate(peers_sorted, 1):
+                sc = calculate_score(p)
+                name = str(p.get('name', 'UNKNOWN'))[:14]
+                rel = p.get('reliability', 0)
+                rep = p.get('reputation', 50)
+                hops = str(p.get('hops', '?'))
+                rtt = f"{p.get('latency_ms', '?')}ms"
+                
+                # XRP
+                if p.get('xrp_reachable'):
+                    xrp_lat = p.get('xrp_latency_ms')
+                    xrp_str = f"✅{xrp_lat}ms" if xrp_lat else "✅ OK"
+                else:
+                    xrp_str = "❌"
+                
+                # Stellar
+                if p.get('stellar_reachable'):
+                    stellar_lat = p.get('stellar_latency_ms')
+                    stellar_str = f"✅{stellar_lat}ms" if stellar_lat else "✅ OK"
+                else:
+                    stellar_str = "❌"
+                
+                internet = "🌐" if p.get('has_internet') else "📡"
+                last_seen = self._format_time_ago(p.get('last_seen'))
+                
+                assets = p.get('assets', [])
+                if isinstance(assets, list):
+                    assets_str = ', '.join(assets[:3])
+                    if len(assets) > 3:
+                        assets_str += f" +{len(assets)-3}"
+                else:
+                    assets_str = str(assets)[:20]
+                
+                # Colori
+                sc_color = Colors.GREEN if sc > 70 else Colors.YELLOW if sc > 40 else Colors.RED
+                rel_color = Colors.GREEN if rel > 0.9 else Colors.YELLOW if rel > 0.7 else Colors.RED
+                
+                print(f"{idx:<3} {name:<16} {sc_color}{sc:5.0f}{Colors.RESET} {rel_color}{rel:5.2f}{Colors.RESET} {rep:<4} {hops:<5} {rtt:<8} {xrp_str:<14} {stellar_str:<14} {internet:<9} {last_seen:<15} {assets_str}")
         
-        # Statistiche
+        # ============================================================
+        # LINEA FINALE
+        # ============================================================
+        print("=" * (230 if has_radio else 200))
+        
+        # ============================================================
+        # STATISTICHE
+        # ============================================================
         stats = self.metrics.get_stats() if hasattr(self.metrics, 'get_stats') else {}
         if stats:
             print(f"\n📊 Statistiche:")
@@ -1945,6 +2042,28 @@ class WalletCLI:
                 print(f"   Latenza media Reticulum: {stats.get('avg_latency_ms')}ms")
             if stats.get('avg_rssi'):
                 print(f"   RSSI medio: {stats.get('avg_rssi')}dBm")
+        
+        # ============================================================
+        # MIGLIOR PEER
+        # ============================================================
+        if peers_sorted:
+            b = peers_sorted[0]
+            best_score = calculate_score(b)
+            print(f"\n🏆 MIGLIOR PEER: {b.get('name', 'UNKNOWN')}")
+            print(f"   Score: {best_score:.0f} | Rel: {b.get('reliability', 0):.2f} | Rep: {b.get('reputation', 50)}")
+            print(f"   Gateway ID: {b.get('gateway_id', 'N/A')}")
+            print(f"   RTT Reticulum: {b.get('latency_ms', '?')}ms | Hops: {b.get('hops', '?')}")
+            print(f"   XRP: {'✅' if b.get('xrp_reachable') else '❌'} ({b.get('xrp_latency_ms', '?')}ms)")
+            print(f"   Stellar: {'✅' if b.get('stellar_reachable') else '❌'} ({b.get('stellar_latency_ms', '?')}ms)")
+            print(f"   Internet: {'✅' if b.get('has_internet') else '❌'}")
+            if b.get('assets'):
+                print(f"   Assets: {', '.join(b.get('assets', []))}")
+            rssi = b.get('rssi')
+            if rssi is not None:
+                print(f"   RSSI: {rssi:.1f}dBm")
+            snr = b.get('snr')
+            if snr is not None:
+                print(f"   SNR: {snr:.1f}dB")
 
     def _reticulum_best_gateway(self, asset: str):
         """Mostra il miglior gateway per un asset"""

@@ -23,9 +23,10 @@ echo ""
 # 0. RILEVA PIATTAFORMA
 # ============================================================
 detect_platform() {
-    if [[ -d "/data/data/com.termux" ]] || [[ -f "/system/build.prop" ]]; then
+    # Rileva Termux PRIMA di tutto
+    if [[ -d "/data/data/com.termux" ]]; then
         PLATFORM="termux"
-        echo -e "${GREEN}✅ Piattaforma rilevata: Termux/Android${NC}"
+        echo -e "${GREEN}✅ Piattaforma: Termux/Android${NC}"
         return
     fi
     
