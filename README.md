@@ -397,6 +397,53 @@ Traditional Wallets
 - Speed   ✅ Rust/Core ❌ Slow (interpreted)
 
 ---
+Comparison Matrix
+Feature PayPal  Satispay  Revolut This Wallet
+Offline payments  ❌ ❌ ❌ ✅
+Multi-chain ❌ ❌ ❌ ✅
+DEX integration ❌ ❌ ❌ ✅
+Global reach  ⚠️  ❌ ⚠️  ✅
+Trustline tokens  ❌ ❌ ❌ ✅
+Open source ❌ ❌ ❌ ✅
+No IBAN required  ❌ ❌ ❌ ✅
+No mandatory bank ❌ ❌ ❌ ✅
+Interoperable ❌ ❌ ⚠️  ✅
+Near-zero fees  ❌ ❌ ⚠️  ✅
+
+Legend: ✅ Supported · ⚠️ Limited / Partial · ❌ Not supported
+
+Key Security Measures
+Aspect  Implementation
+Key Storage AES256-encrypted, hardware-backed where available
+Transaction Signing Ed25519/ECDSA with secure derivation
+Network Encryption  End-to-end encryption via Reticulum
+Replay Attack Prevention  Sequence numbers + timestamps
+Phishing Resistance RNS lookup verification
+Gateway Trust Reputation system + verification
+
+Gateway Risk Mitigation
+    1. No custodied funds - Gateway never holds user funds
+    2. Signed transactions only - Gateway relays already-signed transactions
+    3. Rate limiting - Prevent spam/DoS
+    4. Blacklist - Reputation-based filtering
+    5. Multi-gateway routing - Redundancy ensures delivery
+Rust Core (wallet-core)
+Why Rust for critical components:
+    • ✅ Memory safety (no buffer overflows, use-after-free)
+    • ✅ Concurrency (tokio, async/await)
+    • ✅ Performance (zero-cost abstractions)
+    • ✅ Security (enforced at compile time)
+
+Challenge Solution
+Gateway discovery Distributed announce system + cache
+Offline transaction delivery  Reticulum mesh + eventual consistency
+Trustline management  Auto-detect + graceful fallback
+Cross-chain routing Plugin architecture + path finding
+User identity RNS alias + public key mapping
+Spam prevention Reputation system + rate limiting
+Regulatory compliance Modular design for KYC/AML plugins
+
+---
 
 ## 🛠️ Build from Source
 
