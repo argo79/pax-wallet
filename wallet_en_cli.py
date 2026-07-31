@@ -792,26 +792,24 @@ class WalletCLI:
             print_cyan("   🔐 Using 24 words (maximum security)")
         
         # ============================================================
-        # 🔥 CHIEDE PASSPHRASE (opzionale)
+        # 🔥 CHIEDE PASSPHRASE (OSCURATA) - SENZA y/N
         # ============================================================
         print("")
-        print("   🔐 Passphrase (optional):")
-        print("      A passphrase adds an extra layer of security.")
+        print("   🔐 Passphrase (optional, press Enter to skip):")
         print("      If you forget it, the wallet is unrecoverable.")
         print("")
-        use_passphrase = input("   Use a passphrase? (y/N): ").strip().lower()
         
-        passphrase = ""
-        if use_passphrase == "y":
-            passphrase = input("   Enter passphrase: ").strip()
-            if passphrase:
-                confirm = input("   Confirm passphrase: ").strip()
-                if confirm != passphrase:
-                    print_red("❌ Passphrases do not match!")
-                    return None
-                print_cyan(f"   🔐 Passphrase set")
-            else:
-                print_yellow("   ⚠️ Empty passphrase, ignored")
+        import getpass
+        passphrase = getpass.getpass("   Enter passphrase: ").strip()
+        
+        if passphrase:
+            confirm = getpass.getpass("   Confirm passphrase: ").strip()
+            if confirm != passphrase:
+                print_red("❌ Passphrases do not match!")
+                return None
+            print_cyan(f"   🔐 Passphrase set")
+        else:
+            print_yellow("   ⚠️ No passphrase")
         
         # ============================================================
         # 🔥 CREA WALLET
@@ -872,16 +870,16 @@ class WalletCLI:
                 crypto_param = crypto
             
             # ============================================================
-            # 🔥 SE MNEMONICA, CHIEDI PASSPHRASE
+            # 🔥 SE MNEMONICA, CHIEDI PASSPHRASE (OSCURATA)
             # ============================================================
             passphrase = ""
             if import_type == "bip39":
                 print("")
-                print("   🔐 Passphrase (optional):")
+                print("   🔐 Passphrase (optional, press Enter to skip):")
                 print("      Enter the passphrase if the wallet was created with one.")
-                print("      If you didn't use one, leave empty.")
                 print("")
-                passphrase = input("   Passphrase (Enter to skip): ").strip()
+                import getpass
+                passphrase = getpass.getpass("   Enter passphrase: ").strip()
                 if passphrase:
                     print_cyan(f"   🔐 Passphrase used")
                 else:
@@ -896,7 +894,6 @@ class WalletCLI:
                 print_cyan("   🔄 Conversione numeri Xaman via Node.js...")
                 result = self.wallet.import_wallet(" ".join(numbers_parts), name, crypto_param)
             else:
-                # 🔥 PASSA LA PASSPHRASE SE PRESENTE
                 result = self.wallet.import_wallet(seed_input, name, crypto_param, passphrase=passphrase)
             
             print_green(f"\n✅ Wallet importato!")
