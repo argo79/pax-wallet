@@ -22,7 +22,7 @@
 
 🕊️ **PAX** means **Peace** in Latin and stands for **P**ayment **A**utonomous e**X**change.
 
-Part of the **HOPE Ecosystem (Human Open Payment Ecosystem)**, PAX Wallet promotes a vision of:
+Part of the **HOPE (Human Open Payment Ecosystem)**, PAX Wallet promotes a vision of:
 
 - 🌍 Borderless finance
 - 🔓 Permissionless payments
