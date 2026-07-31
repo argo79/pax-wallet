@@ -397,51 +397,86 @@ Traditional Wallets
 - Speed   ✅ Rust/Core ❌ Slow (interpreted)
 
 ---
-Comparison Matrix
-Feature PayPal  Satispay  Revolut This Wallet
-Offline payments  ❌ ❌ ❌ ✅
-Multi-chain ❌ ❌ ❌ ✅
-DEX integration ❌ ❌ ❌ ✅
-Global reach  ⚠️  ❌ ⚠️  ✅
-Trustline tokens  ❌ ❌ ❌ ✅
-Open source ❌ ❌ ❌ ✅
-No IBAN required  ❌ ❌ ❌ ✅
-No mandatory bank ❌ ❌ ❌ ✅
-Interoperable ❌ ❌ ⚠️  ✅
-Near-zero fees  ❌ ❌ ⚠️  ✅
+## Comparison Matrix
 
-Legend: ✅ Supported · ⚠️ Limited / Partial · ❌ Not supported
+| Feature           | PayPal | Satispay | Revolut | **This Wallet** |
+| ----------------- | :----: | :------: | :-----: | :-------------: |
+| Offline payments  |    ❌   |     ❌    |    ❌    |        ✅        |
+| Multi-chain       |    ❌   |     ❌    |    ❌    |        ✅        |
+| DEX integration   |    ❌   |     ❌    |    ❌    |        ✅        |
+| Global reach      |   ⚠️   |     ❌    |    ⚠️   |        ✅        |
+| Trustline tokens  |    ❌   |     ❌    |    ❌    |        ✅        |
+| Open source       |    ❌   |     ❌    |    ❌    |        ✅        |
+| No IBAN required  |    ❌   |     ❌    |    ❌    |        ✅        |
+| No mandatory bank |    ❌   |     ❌    |    ❌    |        ✅        |
+| Interoperable     |    ❌   |     ❌    |    ⚠️   |        ✅        |
+| Near-zero fees    |    ❌   |     ❌    |    ⚠️   |        ✅        |
 
-Key Security Measures
-Aspect  Implementation
-Key Storage AES256-encrypted, hardware-backed where available
-Transaction Signing Ed25519/ECDSA with secure derivation
-Network Encryption  End-to-end encryption via Reticulum
-Replay Attack Prevention  Sequence numbers + timestamps
-Phishing Resistance RNS lookup verification
-Gateway Trust Reputation system + verification
+**Legend:** ✅ Supported · ⚠️ Limited / Partial · ❌ Not supported
 
-Gateway Risk Mitigation
-    1. No custodied funds - Gateway never holds user funds
-    2. Signed transactions only - Gateway relays already-signed transactions
-    3. Rate limiting - Prevent spam/DoS
-    4. Blacklist - Reputation-based filtering
-    5. Multi-gateway routing - Redundancy ensures delivery
-Rust Core (wallet-core)
-Why Rust for critical components:
-    • ✅ Memory safety (no buffer overflows, use-after-free)
-    • ✅ Concurrency (tokio, async/await)
-    • ✅ Performance (zero-cost abstractions)
-    • ✅ Security (enforced at compile time)
+---
 
-Challenge Solution
-Gateway discovery Distributed announce system + cache
-Offline transaction delivery  Reticulum mesh + eventual consistency
-Trustline management  Auto-detect + graceful fallback
-Cross-chain routing Plugin architecture + path finding
-User identity RNS alias + public key mapping
-Spam prevention Reputation system + rate limiting
-Regulatory compliance Modular design for KYC/AML plugins
+## Security Architecture
+
+| Aspect                       | Implementation                                             |
+| ---------------------------- | ---------------------------------------------------------- |
+| **Key Storage**              | AES-256 encrypted; hardware-backed storage where available |
+| **Transaction Signing**      | Ed25519 / ECDSA with secure key derivation                 |
+| **Network Encryption**       | End-to-end encryption via Reticulum                        |
+| **Replay Attack Prevention** | Sequence numbers + timestamps                              |
+| **Phishing Resistance**      | RNS lookup verification                                    |
+| **Gateway Trust**            | Reputation system + cryptographic verification             |
+
+### Gateway Risk Mitigation
+
+The gateway is designed as a **relay**, not a custodian.
+
+1. **No custodied funds** — Gateways never hold user funds.
+2. **Signed transactions only** — Gateways relay transactions that have already been signed by the user.
+3. **Rate limiting** — Prevents spam and denial-of-service abuse.
+4. **Blacklist / reputation filtering** — Malicious or unreliable gateways can be filtered.
+5. **Multi-gateway routing** — Redundant gateways improve delivery reliability.
+
+---
+
+## Rust Core — `wallet-core`
+
+Critical wallet and cryptographic components are implemented in Rust.
+
+| Benefit             | Description                                                                 |
+| ------------------- | --------------------------------------------------------------------------- |
+| ✅ **Memory Safety** | Prevents common vulnerabilities such as buffer overflows and use-after-free |
+| ✅ **Concurrency**   | Efficient asynchronous execution using `tokio` and `async/await`            |
+| ✅ **Performance**   | Zero-cost abstractions with native performance                              |
+| ✅ **Security**      | Strong compile-time guarantees and strict type safety                       |
+
+---
+
+## Architecture Challenges & Solutions
+
+| Challenge                        | Solution                                           |
+| -------------------------------- | -------------------------------------------------- |
+| **Gateway discovery**            | Distributed announce system + local cache          |
+| **Offline transaction delivery** | Reticulum mesh + eventual consistency              |
+| **Trustline management**         | Automatic detection + graceful fallback            |
+| **Cross-chain routing**          | Plugin architecture + path finding                 |
+| **User identity**                | RNS aliases + public-key mapping                   |
+| **Spam prevention**              | Reputation system + rate limiting                  |
+| **Regulatory compliance**        | Modular architecture with optional KYC/AML plugins |
+
+---
+
+## Design Principles
+
+The wallet is designed around a few fundamental principles:
+
+* **Non-custodial** — Users retain control of their private keys and funds.
+* **Offline-capable** — Transactions can be prepared and propagated without conventional Internet connectivity.
+* **Interoperable** — Multiple networks, assets and routing mechanisms can coexist.
+* **Open source** — Core components are transparent and auditable.
+* **Modular** — Networking, compliance, chains and gateways can evolve independently.
+* **Security-first** — Cryptography, identity and transaction validation are handled by dedicated security-critical components.
+
 
 ---
 
