@@ -679,71 +679,78 @@ class WalletCLI:
         if not self._validate_wallet_name(name):
             return None
         
-        print_blue(f"📥 Importazione wallet...")
-        
-        manager = self.wallet._xrp_manager
-        
-        if network != manager.network:
-            manager.set_network(network)
-            print_yellow(f"🌐 Rete impostata a: {network.upper()}")
-        
-        cleaned = seed_input
-        cleaned = re.sub(r'[A-Ha-h]:', '', cleaned)
-        cleaned = re.sub(r',', ' ', cleaned)
-        cleaned = re.sub(r'\s+', ' ', cleaned).strip()
-        numbers_parts = cleaned.split()
-        
-        import_type = manager.detect_input_type(seed_input)
-        print(f"   Tipo rilevato: {import_type}")
-        
-        crypto_param = None
-        if crypto and crypto.lower() != "auto":
-            crypto_param = crypto
-        
-        if len(numbers_parts) == 8 and all(p.isdigit() and len(p) == 6 for p in numbers_parts):
-            import_type = "numbers"
-            print_cyan(f"   🔢 Numeri Xaman rilevati: {numbers_parts}")
-            print_cyan("   🔄 Conversione numeri Xaman via Node.js...")
-            result = self.wallet.import_wallet(" ".join(numbers_parts), name, crypto_param)
-        else:
-            result = self.wallet.import_wallet(seed_input, name, crypto_param)
-        
-        print_green(f"\n✅ Wallet importato!")
-        print(f"   Identity: {result['identity_id']}")
-        print(f"   Address: {result['address']}")
-        print(f"   Type: {result['seed_type']}")
-        
-        print(f"\n📊 DETTAGLI WALLET:")
-        print(f"   Crypto: {manager.crypto_type}")
-        print(f"   Network: {manager.network}")
-        
-        if manager.seed_phrase:
-            print(f"   Mnemonic: {manager.seed_phrase}")
-            print(f"   Word Count: {len(manager.seed_phrase.split())}")
-        
-        if manager.seed_numbers:
-            print(f"   Secret Numbers: {' '.join(manager.seed_numbers)}")
-        
-        if manager.base_seed_xrp:
-            print(f"   XRP Seed: {manager.base_seed_xrp}")
-        
-        if manager.base_seed_stellar:
-            print(f"   Stellar Seed: {manager.base_seed_stellar}")
-        
-        if manager.base_private:
-            print(f"   Private Key: {manager.base_private.hex()}")
-        
         try:
-            balance = manager.get_balance()
-            print(f"   Saldo: {balance} {manager.crypto_type}")
-        except:
-            pass
-        
-        self.wallet.save()
-        self._save_wallet_as(name)
-        self._set_active_wallet_name(name)
-        
-        return result
+            print_blue(f"📥 Importazione wallet...")
+            
+            manager = self.wallet._xrp_manager
+            
+            if network != manager.network:
+                manager.set_network(network)
+                print_yellow(f"🌐 Rete impostata a: {network.upper()}")
+            
+            cleaned = seed_input
+            cleaned = re.sub(r'[A-Ha-h]:', '', cleaned)
+            cleaned = re.sub(r',', ' ', cleaned)
+            cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+            numbers_parts = cleaned.split()
+            
+            import_type = manager.detect_input_type(seed_input)
+            print(f"   Tipo rilevato: {import_type}")
+            
+            crypto_param = None
+            if crypto and crypto.lower() != "auto":
+                crypto_param = crypto
+            
+            if len(numbers_parts) == 8 and all(p.isdigit() and len(p) == 6 for p in numbers_parts):
+                import_type = "numbers"
+                print_cyan(f"   🔢 Numeri Xaman rilevati: {numbers_parts}")
+                print_cyan("   🔄 Conversione numeri Xaman via Node.js...")
+                result = self.wallet.import_wallet(" ".join(numbers_parts), name, crypto_param)
+            else:
+                result = self.wallet.import_wallet(seed_input, name, crypto_param)
+            
+            print_green(f"\n✅ Wallet importato!")
+            print(f"   Identity: {result['identity_id']}")
+            print(f"   Address: {result['address']}")
+            print(f"   Type: {result['seed_type']}")
+            
+            print(f"\n📊 DETTAGLI WALLET:")
+            print(f"   Crypto: {manager.crypto_type}")
+            print(f"   Network: {manager.network}")
+            
+            if manager.seed_phrase:
+                print(f"   Mnemonic: {manager.seed_phrase}")
+                print(f"   Word Count: {len(manager.seed_phrase.split())}")
+            
+            if manager.seed_numbers:
+                print(f"   Secret Numbers: {' '.join(manager.seed_numbers)}")
+            
+            if manager.base_seed_xrp:
+                print(f"   XRP Seed: {manager.base_seed_xrp}")
+            
+            if manager.base_seed_stellar:
+                print(f"   Stellar Seed: {manager.base_seed_stellar}")
+            
+            if manager.base_private:
+                print(f"   Private Key: {manager.base_private.hex()}")
+            
+            try:
+                balance = manager.get_balance()
+                print(f"   Saldo: {balance} {manager.crypto_type}")
+            except:
+                pass
+            
+            self.wallet.save()
+            self._save_wallet_as(name)
+            self._set_active_wallet_name(name)
+            
+            return result
+            
+        except Exception as e:
+            print_red(f"❌ Errore importazione: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
     
     def _cmd_balance_xlm(self, refresh: bool = False):
         manager = self.wallet._xrp_manager
@@ -2110,68 +2117,86 @@ class WalletCLI:
         else:
             print_red(f"❌ Nessun gateway trovato per {asset}")
 
-    def _reticulum_send(self, args: List[str]):
-        """Invia transazione via Reticulum"""
-        if not self.reticulum:
-            print_red("❌ Reticulum non inizializzato")
-            return
-        
-        if not self.wallet or not self.wallet._xrp_manager.is_loaded():
-            print_red("❌ Nessun wallet caricato!")
-            return
-
-        to_addr = None
-        amount = None
-        asset = "XRP"
-        gateway_id = None
-
-        for i, arg in enumerate(args):
-            if arg == "--to" and i + 1 < len(args):
-                to_addr = args[i + 1]
-            elif arg == "--amount" and i + 1 < len(args):
-                try:
-                    amount = float(args[i + 1])
-                except:
-                    pass
-            elif arg == "--asset" and i + 1 < len(args):
-                asset = args[i + 1]
-            elif arg == "--gateway" and i + 1 < len(args):
-                gateway_id = args[i + 1]
-
-        if not to_addr or not amount:
-            print_red("❌ Specifica --to e --amount")
-            print("Esempio: reticulum send --to r... --amount 10 --asset XRP")
-            return
-
-        if not gateway_id:
-            print_blue("🔍 Cerco gateway disponibili...")
-            gateways = self.reticulum.discover_gateways()
-            if not gateways:
-                print_red("❌ Nessun gateway disponibile")
+        def _reticulum_send(self, args: List[str]):
+            """Invia transazione via Reticulum - CON VALIDAZIONE"""
+            if not self.reticulum:
+                print_red("❌ Reticulum non inizializzato")
                 return
-            gateway_id = gateways[0].get('gateway_id')
-            print_yellow(f"📌 Usando gateway: {gateway_id[:16]}...")
+            
+            if not self.wallet or not self.wallet._xrp_manager.is_loaded():
+                print_red("❌ Nessun wallet caricato!")
+                return
 
-        manager = self.wallet._xrp_manager
-        tx_data = {
-            "from": manager.get_address(),
-            "to": to_addr,
-            "amount": str(amount),
-            "asset": asset,
-            "network": manager.network,
-            "timestamp": int(time.time())
-        }
+            to_addr = None
+            amount = None
+            asset = "XRP"
+            gateway_id = None
 
-        print_blue(f"📡 Invio transazione via Reticulum...")
-        try:
-            response = self.reticulum.send_transaction_via_reticulum(gateway_id, tx_data)
-            if response.get("success"):
-                print_green(f"✅ Transazione inviata!")
-                print(f"   Hash: {response.get('hash', 'N/A')}")
-            else:
-                print_red(f"❌ Errore: {response.get('error', 'Sconosciuto')}")
-        except Exception as e:
-            print_red(f"❌ Errore durante l'invio: {e}")
+            # Estrai parametri dagli argomenti
+            for i, arg in enumerate(args):
+                if arg == "--to" and i + 1 < len(args):
+                    to_addr = args[i + 1].strip()
+                elif arg == "--amount" and i + 1 < len(args):
+                    try:
+                        amount = float(args[i + 1])
+                    except:
+                        pass
+                elif arg == "--asset" and i + 1 < len(args):
+                    asset = args[i + 1]
+                elif arg == "--gateway" and i + 1 < len(args):
+                    gateway_id = args[i + 1]
+
+            # VALIDA INDIRIZZO
+            if not to_addr:
+                print_red("❌ Indirizzo destinatario non valido")
+                return
+            if len(to_addr) < 20:
+                print_red("❌ Indirizzo troppo corto (minimo 20 caratteri)")
+                return
+
+            # VALIDA AMMONTARE
+            if not amount or amount <= 0:
+                print_red("❌ Ammontare non valido (deve essere > 0)")
+                return
+
+            # CERCA GATEWAY
+            if not gateway_id:
+                print_blue("🔍 Cerco gateway disponibili...")
+                gateways = self.reticulum.discover_gateways()
+                if not gateways:
+                    print_red("❌ Nessun gateway disponibile")
+                    return
+                # Mostra gateway disponibili
+                print_blue(f"📡 Gateway disponibili: {len(gateways)}")
+                for i, gw in enumerate(gateways[:5], 1):
+                    name = gw.get('name', 'UNKNOWN')
+                    gw_id = gw.get('gateway_id', '?')
+                    print(f"   {i}) {name} ({gw_id[:16]}...)")
+                if len(gateways) > 5:
+                    print(f"   ... e altri {len(gateways)-5}")
+                gateway_id = gateways[0].get('gateway_id')
+                print_yellow(f"📌 Usando gateway: {gateway_id[:16]}...")
+
+            manager = self.wallet._xrp_manager
+            tx_data = {
+                "from": manager.get_address(),
+                "to": to_addr,
+                "amount": str(amount),
+                "asset": asset,
+                "network": manager.network,
+                "timestamp": int(time.time())
+            }
+
+            print_blue(f"📡 Invio transazione via Reticulum...")
+            try:
+                response = self.reticulum.send_transaction_via_reticulum(gateway_id, tx_data)
+                if response.get("success"):
+                    print_green(f"✅ Transazione inviata!")
+                    print(f"   Hash: {response.get('hash', 'N/A')}")
+                else:
+                    print_red(f"❌ Errore: {response.get('error', 'Sconosciuto')}")
+            except Exception as e:
+                print_red(f"❌ Errore durante l'invio: {e}")
 
 
     def _reticulum_request_info(self):
@@ -2483,7 +2508,17 @@ def interactive_mode():
                     cli._reticulum_request_info()
                 elif sub_choice == '9':
                     to_addr = input("Indirizzo destinatario: ").strip()
-                    amount = float(input("Ammontare: ").strip())
+                    if len(to_addr) < 20:
+                        print_red("❌ Indirizzo troppo corto (minimo 20 caratteri)")
+                        continue  # <-- TORNA AL MENU, NON ESCE
+                    try:
+                        amount = float(input("Ammontare: ").strip())
+                        if amount <= 0:
+                            print_red("❌ L'ammontare deve essere maggiore di 0")
+                            continue
+                    except ValueError:
+                        print_red("❌ Ammontare non valido")
+                        continue
                     asset = input("Asset (XRP): ").strip() or "XRP"
                     if to_addr and amount:
                         cli._reticulum_send(["--to", to_addr, "--amount", str(amount), "--asset", asset])
