@@ -211,17 +211,25 @@ Feature Status
 wget https://github.com/argo79/pax-wallet/releases/download/v0.9.1b/paxwallet
 ```
 ```bash
-chmod +x paxwallet
+chmod +x paxwallet-en
 ```
 ```bash
-./paxwallet interactive
+chmod +x paxwallet-it
 ```
-
+```bash
+./paxwallet-en interactive
+```
+```bash
+./paxwallet-it interactive
+```
 ### Windows
 
 Download wallet.exe and run
 ```powershell
-paxwallet.exe interactive
+paxwallet-en.exe interactive
+```
+```powershell
+paxwallet-en.exe interactive
 ```
 
 ---
@@ -259,7 +267,7 @@ pip install -r requirements.txt
 
 # Run
 ```bash
-python3 wallet_cli.py interactive
+python3 wallet_en_cli.py interactive
 ```
 
 ### Dependencies
@@ -371,7 +379,7 @@ Traditional Wallets
 
 ./build_rust_core.sh
 ./build_wallet.sh
-./dist/paxwallet interactive
+./dist/paxwallet-en interactive
 ```
 
 ## Windows
@@ -384,7 +392,7 @@ pip install -r requirements.txt
 pyinstaller --onefile --console --name paxwallet.exe wallet_cli.py
 
 # Run
-paxwallet.exe interactive
+paxwallet-en.exe interactive
 ```
 
 ---
