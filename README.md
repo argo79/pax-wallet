@@ -239,11 +239,16 @@ paxwallet-en.exe interactive
 ### Clone repository
 
 ```bash
-python -m venv venv
+python3.12 -m venv venv
 ```
-
+```bash
+cd venv && source bin/activate
+```
 ```bash
 git clone https://github.com/argo79/pax-wallet.git
+```
+```bash
+cd pax-wallet
 ```
 
 ## Termux on linux
@@ -257,17 +262,39 @@ cd pax-wallet
 
 ### Install dependencies
 ```bash
+sudo apt-get install cargo rustup && rustup update stable
+```
+```bash
 pip install -r requirements.txt
+```
+if any problems with cryptographic and/or coincurve libraries:
+```bash
+pip install coincurve==19.0.0
 ```
 
 # Build Rust core (optional, pre-built libs included)
 ```bash
 ./build_rust_core.sh
 ```
+creates -> lib/libwallet_core_linux.so &
+wallet_core.so in the root for the project build.
+
+```bash
+./build_wallet.sh
+```
+creates -> dist/paxwallet-en or dist/paxwallet-it
 
 # Run
 ```bash
 python3 wallet_en_cli.py interactive
+```
+or
+```bash
+./dist/paxwallet-en
+```
+or
+```bash
+./dist/paxwallet-it
 ```
 
 ### Dependencies
