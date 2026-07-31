@@ -1320,27 +1320,45 @@ class WalletCLI:
     def cmd_list_wallets(self):
         wallets = self._get_wallet_list()
         if not wallets:
-            print_red("❌ No wallets saved.")
+            print_red("❌ Nessun wallet salvato.")
             return
         
         active = self._get_active_wallet_name()
         
-        print("\n📂 SAVED WALLETS")
-        print("=" * 80)
-        print(f"{'Name':<18} {'Crypto':<6} {'Network':<8} {'Address':<40}")
-        print("-" * 60)
+        print("\n📂 WALLET SALVATI")
+        print("=" * 100)
+        print(f"{'#':<4} {'Nome':<18} {'Crypto':<6} {'Rete':<8} {'Indirizzo':<42}")
+        print("-" * 100)
         
-        for w in wallets:
+        for i, w in enumerate(wallets, 1):
             marker = "▶" if w["name"] == active else " "
             crypto = w.get("crypto", "XRP")
             network = w.get("network", "testnet")
-            print(f"{marker} {w['name']:<17} {crypto:<6} {network:<8} {w['address']}")
+            address = w.get("address", "unknown")
+            addr_short = address[:20] + "..." if len(address) > 25 else address
+            print(f"{i:<4} {marker} {w['name']:<17} {crypto:<6} {network:<8} {addr_short:<42}")
         
-        print("-" * 60)
-        print(f"Total: {len(wallets)} wallets")
+        print("-" * 100)
+        print(f"Totale: {len(wallets)} wallet")
         if active:
-            print(f"▶ Active: {active}")
-        print("=" * 80)
+            print(f"▶ Attivo: {active}")
+        print("=" * 100)
+        
+        # 🔥 CHIEDE SE MOSTRARE I DETTAGLI DI UN WALLET
+        print("\n📋 Vuoi vedere i dettagli di un wallet?")
+        print("   (premi Invio per saltare)")
+        choice = input("Numero wallet (o Invio): ").strip()
+        
+        if choice.isdigit():
+            idx = int(choice) - 1
+            if 0 <= idx < len(wallets):
+                wallet_name = wallets[idx]["name"]
+                # 🔥 CAMBIA WALLET E MOSTRA INFO
+                if self._switch_wallet(wallet_name):
+                    print_green(f"✅ Wallet cambiato a: {wallet_name}")
+                    self.cmd_info()  # 🔥 USA cmd_info() CHE ESISTE GIÀ!
+                else:
+                    print_red(f"❌ Errore nel cambio wallet")
     
     def cmd_switch(self, name: str):
         """Switch to the specified wallet"""
