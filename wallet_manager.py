@@ -1088,15 +1088,30 @@ class HybridXRPManager:
             return SeedType.NUMBERS.value
         
         if isinstance(seed_input, str):
+            seed_input = seed_input.strip()
+            
+            # 1. CONTROLLA SE È UNA MNEMONICA BIP39 (24 parole) PRIMA DI TUTTO!
+            words = seed_input.split()
+            if len(words) >= 12 and len(words) <= 24:
+                try:
+                    if self.mnemo.check(seed_input):
+                        return SeedType.BIP39.value
+                except:
+                    pass
+            
+            # 2. STELLAR SEED (inizia con S, 56 caratteri)
             if seed_input.startswith("S") and len(seed_input) >= 56:
                 return SeedType.STELLAR_SEED.value
             
+            # 3. PRIVATE KEY (64 caratteri esadecimali)
             if len(seed_input) == 64 and all(c in "0123456789abcdefABCDEF" for c in seed_input):
                 return SeedType.PRIVATE_KEY.value
             
-            if seed_input.startswith("s"):
+            # 4. XRP SEED (inizia con s, MA NON è una mnemonica)
+            if seed_input.startswith("s") and len(seed_input) < 40:
                 return SeedType.XRP_SEED.value
             
+            # 5. NUMERI XAMAN
             numbers = self._clean_numbers_input(seed_input)
             if len(numbers) == 8 and all(p.isdigit() and len(p) == 6 for p in numbers):
                 return SeedType.NUMBERS.value
@@ -1231,6 +1246,13 @@ class HybridXRPManager:
     
     def _import_xrp_seed(self, xrp_seed: str) -> Dict[str, Any]:
         try:
+            # Pulisci l'input (rimuovi spazi, newline)
+            xrp_seed = xrp_seed.strip()
+            
+            # Se contiene spazi, è una mnemonica, non un seed XRP
+            if ' ' in xrp_seed:
+                raise ValueError("XRP seed cannot contain spaces. Did you mean to import a mnemonic?")
+            
             wallet = XRPWallet.from_seed(xrp_seed)
             
             self.seed_type = SeedType.XRP_SEED.value
