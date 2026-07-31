@@ -1,6 +1,6 @@
 {
     "gateway": {
-        "name": "gateway",
+        "name": "gateway-TEST",
         "announce_interval": 1800,
         "internet": "on",
         "ledger_check_interval": 1800,
@@ -13,7 +13,7 @@
     },
     "wallet": {
         "name": "wallet",
-        "announce_interval": 60,
+        "announce_interval": 1800,
         "discover_since_seconds": 86400
     },
     "sync": {

@@ -769,27 +769,77 @@ class WalletCLI:
         if not self._validate_wallet_name(name):
             return None
         
-        print_blue(f"📤 Creazione wallet {crypto} su {network.upper()}...")
+        print_blue(f"📤 Creating {crypto} wallet on {network.upper()}...")
         
         manager = self.wallet._xrp_manager
         if network != manager.network:
             manager.set_network(network)
-            print_yellow(f"🌐 Rete impostata a: {network.upper()}")
+            print_yellow(f"🌐 Network set to: {network.upper()}")
         
-        strength = 256
-        if crypto == "XRP":
+        # ============================================================
+        # 🔥 CHIEDE 12 O 24 PAROLE
+        # ============================================================
+        print("\n   🔐 Choose seed word count:")
+        print("      1) 12 words (128 bit - standard, easier to write)")
+        print("      2) 24 words (256 bit - maximum security)")
+        print("")
+        choice = input("   Choice (1 or 2, default 2): ").strip()
+        
+        if choice == "1":
             strength = 128
+            word_count = 12
+            print_cyan("   🔐 Using 12 words")
+        else:
+            strength = 256
+            word_count = 24
+            print_cyan("   🔐 Using 24 words (maximum security)")
         
-        result = self.wallet.create_wallet(name, crypto, strength=strength)
+        # ============================================================
+        # 🔥 CHIEDE PASSPHRASE (opzionale)
+        # ============================================================
+        print("")
+        print("   🔐 Passphrase (optional):")
+        print("      A passphrase adds an extra layer of security.")
+        print("      If you forget it, the wallet is unrecoverable.")
+        print("")
+        use_passphrase = input("   Use a passphrase? (y/N): ").strip().lower()
         
-        print_green(f"\n✅ Wallet creato su {network.upper()}!")
+        passphrase = ""
+        if use_passphrase == "y":
+            passphrase = input("   Enter passphrase: ").strip()
+            if passphrase:
+                confirm = input("   Confirm passphrase: ").strip()
+                if confirm != passphrase:
+                    print_red("❌ Passphrases do not match!")
+                    return None
+                print_cyan(f"   🔐 Passphrase set")
+            else:
+                print_yellow("   ⚠️ Empty passphrase, ignored")
+        
+        # ============================================================
+        # 🔥 CREA WALLET
+        # ============================================================
+        result = self.wallet.create_wallet(name, crypto, strength=strength, passphrase=passphrase)
+        
+        print_green(f"\n✅ Wallet created on {network.upper()}!")
         print(f"   Identity: {result['identity_id']}")
         print(f"   Address: {result['address']}")
         print(f"   Mnemonic: {result['mnemonic']}")
         print(f"   Word Count: {result['word_count']}")
+        if passphrase:
+            print(f"   Passphrase: {'*' * len(passphrase)}")
         print(f"   Seed: {result.get('seed', 'N/A')}")
-        self.wallet.save()
         
+        # ============================================================
+        # 🔥 AVVERTENZA SULLA PASSPHRASE
+        # ============================================================
+        if passphrase:
+            print("")
+            print_yellow("   ⚠️ WARNING: The passphrase is NOT stored in the wallet!")
+            print_yellow("   Store it in a safe place, SEPARATE from the seed.")
+            print_yellow("   Without the passphrase you CANNOT recover the wallet.")
+        
+        self.wallet.save()
         self._save_wallet_as(name)
         self._set_active_wallet_name(name)
         
@@ -824,13 +874,33 @@ class WalletCLI:
             if crypto and crypto.lower() != "auto":
                 crypto_param = crypto
             
+            # ============================================================
+            # 🔥 SE MNEMONICA, CHIEDI PASSPHRASE
+            # ============================================================
+            passphrase = ""
+            if import_type == "bip39":
+                print("")
+                print("   🔐 Passphrase (optional):")
+                print("      Enter the passphrase if the wallet was created with one.")
+                print("      If you didn't use one, leave empty.")
+                print("")
+                passphrase = input("   Passphrase (Enter to skip): ").strip()
+                if passphrase:
+                    print_cyan(f"   🔐 Passphrase used")
+                else:
+                    print_yellow("   ⚠️ No passphrase")
+            
+            # ============================================================
+            # 🔥 GESTISCI NUMERI XAMAN
+            # ============================================================
             if len(numbers_parts) == 8 and all(p.isdigit() and len(p) == 6 for p in numbers_parts):
                 import_type = "numbers"
                 print_cyan(f"   🔢 Numeri Xaman rilevati: {numbers_parts}")
                 print_cyan("   🔄 Conversione numeri Xaman via Node.js...")
                 result = self.wallet.import_wallet(" ".join(numbers_parts), name, crypto_param)
             else:
-                result = self.wallet.import_wallet(seed_input, name, crypto_param)
+                # 🔥 PASSA LA PASSPHRASE SE PRESENTE
+                result = self.wallet.import_wallet(seed_input, name, crypto_param, passphrase=passphrase)
             
             print_green(f"\n✅ Wallet importato!")
             print(f"   Identity: {result['identity_id']}")
@@ -844,6 +914,9 @@ class WalletCLI:
             if manager.seed_phrase:
                 print(f"   Mnemonic: {manager.seed_phrase}")
                 print(f"   Word Count: {len(manager.seed_phrase.split())}")
+            
+            if passphrase:
+                print(f"   Passphrase: {'*' * len(passphrase)}")
             
             if manager.seed_numbers:
                 print(f"   Secret Numbers: {' '.join(manager.seed_numbers)}")
