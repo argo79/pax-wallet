@@ -1367,8 +1367,7 @@ class WalletCLI:
             crypto = w.get("crypto", "XRP")
             network = w.get("network", "testnet")
             address = w.get("address", "unknown")
-            addr_short = address[:20] + "..." if len(address) > 25 else address
-            print(f"{i:<4} {marker} {w['name']:<17} {crypto:<6} {network:<8} {addr_short:<42}")
+            print(f"{i:<4} {marker} {w['name']:<17} {crypto:<6} {network:<8} {address:<42}")
         
         print("-" * 100)
         print(f"Totale: {len(wallets)} wallet")
@@ -2627,7 +2626,8 @@ def interactive_mode():
                     if wallets:
                         for i, w in enumerate(wallets, 1):
                             marker = "▶" if w["name"] == active else " "
-                            print(f"    {i}. {marker} {w['name']} ({w.get('crypto', 'XRP')} - {w.get('network', 'testnet')})")
+                            address = w.get('address', 'unknown')
+                            print(f"    {i}. {marker} {w['name']:<15} ({w.get('crypto', 'XRP')} - {w.get('network', 'testnet')}) {address}")
                     else:
                         print("    ❌ Nessun wallet salvato")
                     
