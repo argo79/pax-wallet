@@ -682,21 +682,29 @@ class HybridXRPManager:
                 # Create new identity
                 identity_id = self._core.create_identity(f"Wallet_{int(time.time())}")
                 self._core_identity_id = identity_id
-                self._core_integration.set_identity(identity_id)
+                if hasattr(self, '_core_integration') and self._core_integration:
+                    self._core_integration.set_identity(identity_id)
                 return identity_id
             
             # Check if identity exists
             identities = self._core.list_identities()
-            for ident in identities:
-                if ident.get("fingerprint") == fingerprint:
-                    self._core_identity_id = ident["id"]
-                    self._core_integration.set_identity(ident["id"])
-                    return ident["id"]
+            # 🔥 VERIFICA CHE identities SIA UNA LISTA
+            if isinstance(identities, list):
+                for ident in identities:
+                    if isinstance(ident, dict) and ident.get("fingerprint") == fingerprint:
+                        self._core_identity_id = ident["id"]
+                        if hasattr(self, '_core_integration') and self._core_integration:
+                            self._core_integration.set_identity(ident["id"])
+                        return ident["id"]
+            else:
+                # Se identities non è una lista, logga e continua
+                logger.warning(f"list_identities returned: {type(identities)}")
             
             # Create new identity with fingerprint
             identity_id = self._core.create_identity(f"Wallet_{fingerprint[:8]}")
             self._core_identity_id = identity_id
-            self._core_integration.set_identity(identity_id)
+            if hasattr(self, '_core_integration') and self._core_integration:
+                self._core_integration.set_identity(identity_id)
             return identity_id
             
         except Exception as e:
@@ -2011,6 +2019,23 @@ class HybridXRPManager:
             "core_identity": self._core_identity_id
         }
         
+        # ============================================================
+        # 🔥 AGGIUNGI PRIVATE KEY OVUNQUE SIA DISPONIBILE
+        # ============================================================
+        if self.base_private:
+            info["private_key"] = self.base_private.hex()
+        elif self.base_seed_xrp:
+            # Deriva dal seed XRP
+            try:
+                from xrpl.core import keypairs
+                _, private_key = keypairs.derive_keypair(self.base_seed_xrp)
+                info["private_key"] = private_key
+            except:
+                pass
+        elif self.base_seed_stellar:
+            # Per Stellar, il seed è la private key
+            info["private_key"] = self.base_seed_stellar
+        
         try:
             balance = self.get_balance()
             info["balance"] = balance
@@ -2036,7 +2061,6 @@ class HybridXRPManager:
         
         elif self.seed_type == SeedType.PRIVATE_KEY.value:
             info.update({
-                "private_key": self.base_private.hex() if self.base_private else None,
                 "seed_xrp": self.base_seed_xrp,
             })
         

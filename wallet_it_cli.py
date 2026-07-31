@@ -1085,6 +1085,17 @@ class WalletCLI:
         
         if info.get('private_key'):
             print(f"\n   Private Key: {info['private_key']}")
+        elif manager.base_private:
+            print(f"\n   Private Key: {manager.base_private.hex()}")
+        elif manager.base_seed_xrp:
+            try:
+                from xrpl.core import keypairs
+                _, private_key = keypairs.derive_keypair(manager.base_seed_xrp)
+                print(f"\n   Private Key: {private_key}")
+            except:
+                pass
+        elif manager.base_seed_stellar:
+            print(f"\n   Private Key: {manager.base_seed_stellar}")
         
         derived = manager.list_derived()
         if derived:
