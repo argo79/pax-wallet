@@ -1,13 +1,13 @@
 {
     "gateway": {
         "name": "gateway",
-        "announce_interval": 60,
+        "announce_interval": 1800,
         "internet": "on",
-        "ledger_check_interval": 3600,
+        "ledger_check_interval": 1800,
         "ledger_timeout_seconds": 5,
         "query_interval": 3600,
         "max_peers_to_query": 10,
-        "max_hops_for_query": 3,
+        "max_hops_for_query": 7,
         "query_timeout_seconds": 60,
         "discover_since_seconds": 86400
     },
