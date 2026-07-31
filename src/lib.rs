@@ -9,20 +9,22 @@ use rusqlite::{Connection, Result as SqlResult, params};
 use chrono::{DateTime, Utc};
 use std::fmt;
 use rand::Rng;
+//use std::sync::Mutex;
+use std::path::Path;
 
 // ============================================================
-// NETWORKING (sempre presente)
+// NETWORKING
 // ============================================================
 use reqwest;
 
 // ============================================================
-// PYTHON FFI (opzionale)
+// PYTHON FFI
 // ============================================================
 #[cfg(feature = "python")]
 use pyo3::prelude::*;
 
 // ============================================================
-// NETWORK
+// NETWORK ENUM
 // ============================================================
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Network {
@@ -31,11 +33,40 @@ pub enum Network {
     Bitcoin,
     Ethereum,
     Monero,
+    Solana,
+    Cardano,
 }
 
 impl fmt::Display for Network {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{:?}", self)
+    }
+}
+
+impl Network {
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "XRPL" => Some(Network::XRPL),
+            "Stellar" => Some(Network::Stellar),
+            "Bitcoin" => Some(Network::Bitcoin),
+            "Ethereum" => Some(Network::Ethereum),
+            "Monero" => Some(Network::Monero),
+            "Solana" => Some(Network::Solana),
+            "Cardano" => Some(Network::Cardano),
+            _ => None,
+        }
+    }
+
+    pub fn to_str(&self) -> &'static str {
+        match self {
+            Network::XRPL => "XRPL",
+            Network::Stellar => "Stellar",
+            Network::Bitcoin => "Bitcoin",
+            Network::Ethereum => "Ethereum",
+            Network::Monero => "Monero",
+            Network::Solana => "Solana",
+            Network::Cardano => "Cardano",
+        }
     }
 }
 
@@ -87,12 +118,21 @@ impl Asset {
         Self::new(Network::XRPL, "RLUSD", 6)
             .with_issuer("rHb9CJAWyB4rj91VRwn96DkukG4bwdtyth")
     }
+
+    pub fn usdc() -> Self {
+        Self::new(Network::Stellar, "USDC", 7)
+            .with_issuer("GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN")
+    }
+
+    pub fn eurc() -> Self {
+        Self::new(Network::Stellar, "EURC", 7)
+            .with_issuer("GAQRF3UGHBT6JYQZ7HSUKRGT4JZES5SGLQADGAFMXIFGZ3EUYG5Z4L2D")
+    }
 }
 
 // ============================================================
-// TRUSTLINE - NUOVO
+// TRUSTLINE
 // ============================================================
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Trustline {
     pub id: String,
@@ -196,10 +236,25 @@ impl Identity {
             .expect("Failed to generate mnemonic");
         Self::new(&mnemonic.to_string())
     }
+
+    pub fn from_seed(seed: &[u8; 32]) -> Self {
+        let signing_key = SigningKey::from_bytes(seed);
+        let verifying_key = signing_key.verifying_key();
+        let fingerprint = format!("{:x}", Sha256::digest(verifying_key.as_bytes()));
+
+        Self {
+            id: uuid::Uuid::new_v4().to_string(),
+            name: None,
+            mnemonic: None,
+            master_public_key: hex::encode(verifying_key.as_bytes()),
+            fingerprint,
+            created_at: Utc::now(),
+        }
+    }
 }
 
 // ============================================================
-// DATABASE (ESTESO CON TRUSTLINE)
+// DATABASE
 // ============================================================
 pub struct WalletDB {
     conn: Connection,
@@ -207,8 +262,16 @@ pub struct WalletDB {
 
 impl WalletDB {
     pub fn new(path: &str) -> SqlResult<Self> {
+        // Crea directory se non esiste
+        if let Some(parent) = Path::new(path).parent() {
+            std::fs::create_dir_all(parent).ok();
+        }
+
         let conn = Connection::open(path)?;
-        
+
+        // Enable foreign keys
+        conn.execute("PRAGMA foreign_keys = ON", [])?;
+
         // Tabella identities
         conn.execute(
             "CREATE TABLE IF NOT EXISTS identities (
@@ -222,7 +285,7 @@ impl WalletDB {
             [],
         )?;
 
-        // 🔥 TABELLA TRUSTLINE
+        // Tabella trustlines
         conn.execute(
             "CREATE TABLE IF NOT EXISTS trustlines (
                 id TEXT PRIMARY KEY,
@@ -237,18 +300,22 @@ impl WalletDB {
                 peer_authorized INTEGER NOT NULL DEFAULT 0,
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL,
-                FOREIGN KEY (identity_id) REFERENCES identities(id)
+                FOREIGN KEY (identity_id) REFERENCES identities(id) ON DELETE CASCADE
             )",
             [],
         )?;
 
-        // 🔥 INDICI
+        // Indici
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_trustlines_identity ON trustlines(identity_id)",
             [],
         )?;
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_trustlines_asset ON trustlines(network, asset_code, asset_issuer)",
+            [],
+        )?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_trustlines_active ON trustlines(authorized, peer_authorized)",
             [],
         )?;
 
@@ -297,6 +364,56 @@ impl WalletDB {
         }
     }
 
+    pub fn get_identity_by_fingerprint(&self, fingerprint: &str) -> SqlResult<Option<Identity>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, name, mnemonic, master_public_key, fingerprint, created_at 
+             FROM identities WHERE fingerprint = ?1",
+        )?;
+        let mut rows = stmt.query(params![fingerprint])?;
+        if let Some(row) = rows.next()? {
+            Ok(Some(Identity {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                mnemonic: row.get(2)?,
+                master_public_key: row.get(3)?,
+                fingerprint: row.get(4)?,
+                created_at: DateTime::from_timestamp(row.get(5)?, 0)
+                    .expect("Invalid timestamp"),
+            }))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn list_identities(&self) -> SqlResult<Vec<Identity>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, name, mnemonic, master_public_key, fingerprint, created_at 
+             FROM identities ORDER BY created_at DESC",
+        )?;
+        let mut rows = stmt.query([])?;
+        let mut identities = Vec::new();
+
+        while let Some(row) = rows.next()? {
+            identities.push(Identity {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                mnemonic: row.get(2)?,
+                master_public_key: row.get(3)?,
+                fingerprint: row.get(4)?,
+                created_at: DateTime::from_timestamp(row.get(5)?, 0)
+                    .expect("Invalid timestamp"),
+            });
+        }
+
+        Ok(identities)
+    }
+
+    pub fn delete_identity(&self, id: &str) -> SqlResult<()> {
+        // Le trustline vengono eliminate in cascade grazie a ON DELETE CASCADE
+        self.conn.execute("DELETE FROM identities WHERE id = ?1", params![id])?;
+        Ok(())
+    }
+
     // ============================================================
     // TRUSTLINE - OPERAZIONI
     // ============================================================
@@ -311,7 +428,7 @@ impl WalletDB {
             params![
                 trustline.id,
                 trustline.identity_id,
-                trustline.asset.network.to_string(),
+                trustline.asset.network.to_str(),
                 trustline.asset.code,
                 trustline.asset.issuer,
                 trustline.asset.decimals,
@@ -333,7 +450,7 @@ impl WalletDB {
                     created_at, updated_at
              FROM trustlines WHERE id = ?1"
         )?;
-        
+
         let mut rows = stmt.query(params![id])?;
         if let Some(row) = rows.next()? {
             Ok(Some(self._row_to_trustline(row)?))
@@ -349,28 +466,48 @@ impl WalletDB {
                     created_at, updated_at
              FROM trustlines WHERE identity_id = ?1 ORDER BY created_at DESC"
         )?;
-        
+
         let mut rows = stmt.query(params![identity_id])?;
         let mut trustlines = Vec::new();
-        
+
         while let Some(row) = rows.next()? {
             trustlines.push(self._row_to_trustline(row)?);
         }
-        
+
         Ok(trustlines)
     }
 
-    pub fn has_trustline(&self, identity_id: &str, network: &str, asset_code: &str, issuer: &Option<String>) -> SqlResult<bool> {
+    pub fn get_active_trustlines(&self, identity_id: &str) -> SqlResult<Vec<Trustline>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, identity_id, network, asset_code, asset_issuer, asset_decimals,
+                    limit_amount, balance, authorized, peer_authorized,
+                    created_at, updated_at
+             FROM trustlines 
+             WHERE identity_id = ?1 AND authorized = 1 AND peer_authorized = 1
+             ORDER BY created_at DESC"
+        )?;
+
+        let mut rows = stmt.query(params![identity_id])?;
+        let mut trustlines = Vec::new();
+
+        while let Some(row) = rows.next()? {
+            trustlines.push(self._row_to_trustline(row)?);
+        }
+
+        Ok(trustlines)
+    }
+
+    pub fn has_trustline(&self, identity_id: &str, network: &str, asset_code: &str, issuer: Option<&str>) -> SqlResult<bool> {
         let mut stmt = self.conn.prepare(
             "SELECT COUNT(*) FROM trustlines 
              WHERE identity_id = ?1 AND network = ?2 AND asset_code = ?3 AND asset_issuer = ?4"
         )?;
-        
+
         let count: i64 = stmt.query_row(
             params![identity_id, network, asset_code, issuer],
             |row| row.get(0)
         )?;
-        
+
         Ok(count > 0)
     }
 
@@ -383,11 +520,11 @@ impl WalletDB {
     }
 
     pub fn delete_trustline_by_asset(
-        &self, 
-        identity_id: &str, 
-        network: &str, 
-        asset_code: &str, 
-        issuer: &Option<String>
+        &self,
+        identity_id: &str,
+        network: &str,
+        asset_code: &str,
+        issuer: Option<&str>
     ) -> SqlResult<()> {
         self.conn.execute(
             "DELETE FROM trustlines 
@@ -413,16 +550,17 @@ impl WalletDB {
         Ok(())
     }
 
+    pub fn update_trustline_authorized(&self, id: &str, authorized: bool, peer_authorized: bool) -> SqlResult<()> {
+        self.conn.execute(
+            "UPDATE trustlines SET authorized = ?1, peer_authorized = ?2, updated_at = ?3 WHERE id = ?4",
+            params![authorized as i32, peer_authorized as i32, Utc::now().timestamp(), id],
+        )?;
+        Ok(())
+    }
+
     fn _row_to_trustline(&self, row: &rusqlite::Row) -> SqlResult<Trustline> {
         let network_str: String = row.get(2)?;
-        let network = match network_str.as_str() {
-            "XRPL" => Network::XRPL,
-            "Stellar" => Network::Stellar,
-            "Bitcoin" => Network::Bitcoin,
-            "Ethereum" => Network::Ethereum,
-            "Monero" => Network::Monero,
-            _ => Network::XRPL,
-        };
+        let network = Network::from_str(&network_str).unwrap_or(Network::XRPL);
 
         Ok(Trustline {
             id: row.get(0)?,
@@ -444,7 +582,7 @@ impl WalletDB {
 }
 
 // ============================================================
-// NETWORK MANAGER (IL CUORE)
+// NETWORK MANAGER
 // ============================================================
 pub struct NetworkManager {
     internet_available: bool,
@@ -457,6 +595,12 @@ impl NetworkManager {
             internet_available: true,
             reticulum_available: false,
         }
+    }
+
+    pub fn check_internet(&mut self) -> bool {
+        // Simple check
+        self.internet_available = true; // TODO: Implementare check reale
+        self.internet_available
     }
 
     pub async fn send_via_internet(&self, url: &str, data: Vec<u8>) -> Result<String, reqwest::Error> {
@@ -486,23 +630,134 @@ impl NetworkManager {
 }
 
 // ============================================================
-// PYTHON FFI (solo su richiesta)
+// NETWORK ENUM PER PYTHON
 // ============================================================
 #[cfg(feature = "python")]
-#[pymodule]
-fn wallet_core(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
-    m.add_class::<PyIdentity>()?;
-    m.add_class::<PyAsset>()?;
-    m.add_class::<PyWalletDB>()?;
-    m.add_class::<PyTrustline>()?;  // 🔥 NUOVO
-    m.add_function(wrap_pyfunction!(create_wallet, m)?)?;
-    m.add_function(wrap_pyfunction!(create_trustline, m)?)?;  // 🔥 NUOVO
-    Ok(())
+#[pyclass]
+#[derive(Clone)]
+pub struct PyNetwork {
+    pub inner: Network,
 }
 
 #[cfg(feature = "python")]
+#[pymethods]
+impl PyNetwork {
+    #[staticmethod]
+    fn xrpl() -> Self {
+        Self { inner: Network::XRPL }
+    }
+
+    #[staticmethod]
+    fn stellar() -> Self {
+        Self { inner: Network::Stellar }
+    }
+
+    #[staticmethod]
+    fn bitcoin() -> Self {
+        Self { inner: Network::Bitcoin }
+    }
+
+    #[staticmethod]
+    fn ethereum() -> Self {
+        Self { inner: Network::Ethereum }
+    }
+
+    #[staticmethod]
+    fn monero() -> Self {
+        Self { inner: Network::Monero }
+    }
+
+    fn __repr__(&self) -> String {
+        format!("Network.{}", self.inner.to_str())
+    }
+
+    fn __str__(&self) -> String {
+        self.inner.to_str().to_string()
+    }
+}
+
+// ============================================================
+// ASSET PYTHON
+// ============================================================
+#[cfg(feature = "python")]
 #[pyclass]
-struct PyIdentity {
+#[derive(Clone)]
+pub struct PyAsset {
+    pub inner: Asset,
+}
+
+#[cfg(feature = "python")]
+#[pymethods]
+impl PyAsset {
+    #[new]
+    fn new(network: PyNetwork, code: String, decimals: u8, issuer: Option<String>) -> Self {
+        let mut asset = Asset::new(network.inner, &code, decimals);
+        if let Some(iss) = issuer {
+            asset = asset.with_issuer(&iss);
+        }
+        Self { inner: asset }
+    }
+
+    #[staticmethod]
+    fn xrp() -> Self {
+        Self { inner: Asset::xrp() }
+    }
+
+    #[staticmethod]
+    fn xlm() -> Self {
+        Self { inner: Asset::xlm() }
+    }
+
+    #[staticmethod]
+    fn rlusd() -> Self {
+        Self { inner: Asset::rlusd() }
+    }
+
+    #[staticmethod]
+    fn usdc() -> Self {
+        Self { inner: Asset::usdc() }
+    }
+
+    #[staticmethod]
+    fn eurc() -> Self {
+        Self { inner: Asset::eurc() }
+    }
+
+    #[getter]
+    fn network(&self) -> String {
+        self.inner.network.to_str().to_string()
+    }
+
+    #[getter]
+    fn code(&self) -> String {
+        self.inner.code.clone()
+    }
+
+    #[getter]
+    fn issuer(&self) -> Option<String> {
+        self.inner.issuer.clone()
+    }
+
+    #[getter]
+    fn decimals(&self) -> u8 {
+        self.inner.decimals
+    }
+
+    fn __repr__(&self) -> String {
+        format!("Asset({})", self.inner)
+    }
+
+    fn __str__(&self) -> String {
+        self.inner.to_string()
+    }
+}
+
+// ============================================================
+// IDENTITY PYTHON - CORRETTO
+// ============================================================
+#[cfg(feature = "python")]
+#[pyclass]
+pub struct PyIdentity {
     inner: Identity,
 }
 
@@ -523,133 +778,64 @@ impl PyIdentity {
         }
     }
 
-    fn fingerprint(&self) -> String {
-        self.inner.fingerprint.clone()
+    #[staticmethod]
+    fn generate() -> Self {
+        Self {
+            inner: Identity::generate(),
+        }
     }
 
+    #[staticmethod]
+    fn from_seed(seed: &str) -> PyResult<Self> {
+        let seed_bytes = hex::decode(seed)
+            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+        let seed_array: [u8; 32] = seed_bytes.try_into()
+            .map_err(|_| pyo3::exceptions::PyValueError::new_err("Seed must be 32 bytes"))?;
+        Ok(Self {
+            inner: Identity::from_seed(&seed_array),
+        })
+    }
+
+    #[getter]
     fn id(&self) -> String {
         self.inner.id.clone()
     }
 
-    fn name(&self) -> Option<String> {
+    #[getter]
+    fn get_name(&self) -> Option<String> {
         self.inner.name.clone()
+    }
+
+    #[setter]
+    fn set_name(&mut self, name: Option<String>) {
+        self.inner.name = name;
+    }
+
+    fn fingerprint(&self) -> String {
+        self.inner.fingerprint.clone()
     }
 
     fn mnemonic(&self) -> Option<String> {
         self.inner.mnemonic.clone()
     }
-}
 
-#[cfg(feature = "python")]
-#[pyclass]
-struct PyAsset {
-    inner: Asset,
-}
-
-#[cfg(feature = "python")]
-#[pymethods]
-impl PyAsset {
-    #[staticmethod]
-    fn xrp() -> Self {
-        Self {
-            inner: Asset::xrp(),
-        }
-    }
-
-    #[staticmethod]
-    fn xlm() -> Self {
-        Self {
-            inner: Asset::xlm(),
-        }
-    }
-
-    #[staticmethod]
-    fn rlusd() -> Self {
-        Self {
-            inner: Asset::rlusd(),
-        }
+    fn master_public_key(&self) -> String {
+        self.inner.master_public_key.clone()
     }
 
     fn __repr__(&self) -> String {
-        format!("{}", self.inner)
-    }
-}
-
-#[cfg(feature = "python")]
-#[pyclass]
-struct PyWalletDB {
-    inner: WalletDB,
-}
-
-#[cfg(feature = "python")]
-#[pymethods]
-impl PyWalletDB {
-    #[new]
-    fn new(path: &str) -> PyResult<Self> {
-        Ok(Self {
-            inner: WalletDB::new(path).map_err(|e| {
-                PyErr::new::<pyo3::exceptions::PyIOError, _>(e.to_string())
-            })?,
-        })
-    }
-
-    // ---- IDENTITY ----
-
-    fn save_identity(&self, identity: &PyIdentity) -> PyResult<()> {
-        self.inner.save_identity(&identity.inner).map_err(|e| {
-            PyErr::new::<pyo3::exceptions::PyIOError, _>(e.to_string())
-        })
-    }
-
-    fn get_identity(&self, id: &str) -> PyResult<Option<PyIdentity>> {
-        self.inner
-            .get_identity(id)
-            .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(e.to_string()))
-            .map(|opt| opt.map(|id| PyIdentity { inner: id }))
-    }
-
-    // ---- TRUSTLINE (NUOVE) ----
-
-    fn save_trustline(&self, trustline: &PyTrustline) -> PyResult<()> {
-        self.inner.save_trustline(&trustline.inner).map_err(|e| {
-            PyErr::new::<pyo3::exceptions::PyIOError, _>(e.to_string())
-        })
-    }
-
-    fn get_trustline(&self, id: &str) -> PyResult<Option<PyTrustline>> {
-        self.inner
-            .get_trustline(id)
-            .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(e.to_string()))
-            .map(|opt| opt.map(|tl| PyTrustline { inner: tl }))
-    }
-
-    fn get_trustlines_by_identity(&self, identity_id: &str) -> PyResult<Vec<PyTrustline>> {
-        self.inner
-            .get_trustlines_by_identity(identity_id)
-            .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(e.to_string()))
-            .map(|vec| vec.into_iter().map(|tl| PyTrustline { inner: tl }).collect())
-    }
-
-    fn has_trustline(&self, identity_id: &str, network: &str, asset_code: &str, issuer: Option<&str>) -> PyResult<bool> {
-        self.inner
-            .has_trustline(identity_id, network, asset_code, &issuer.map(|s| s.to_string()))
-            .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(e.to_string()))
-    }
-
-    fn delete_trustline(&self, id: &str) -> PyResult<()> {
-        self.inner
-            .delete_trustline(id)
-            .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(e.to_string()))
+        format!("Identity(id={}, fingerprint={}, name={:?})", 
+            self.inner.id, self.inner.fingerprint, self.inner.name)
     }
 }
 
 // ============================================================
-// PYTHON TRUSTLINE (NUOVO)
+// TRUSTLINE PYTHON
 // ============================================================
-
 #[cfg(feature = "python")]
 #[pyclass]
-struct PyTrustline {
+#[derive(Clone)]
+pub struct PyTrustline {
     inner: Trustline,
 }
 
@@ -657,16 +843,18 @@ struct PyTrustline {
 #[pymethods]
 impl PyTrustline {
     #[new]
-    fn new(identity_id: &str, asset: &PyAsset, limit: Option<f64>) -> Self {
+    fn new(identity_id: String, asset: PyAsset, limit: Option<f64>) -> Self {
         Self {
-            inner: Trustline::new(identity_id, asset.inner.clone(), limit),
+            inner: Trustline::new(&identity_id, asset.inner, limit),
         }
     }
 
+    #[getter]
     fn id(&self) -> String {
         self.inner.id.clone()
     }
 
+    #[getter]
     fn identity_id(&self) -> String {
         self.inner.identity_id.clone()
     }
@@ -705,27 +893,180 @@ impl PyTrustline {
         self.inner.set_balance(balance);
     }
 
-    fn with_balance(&self, balance: f64) -> PyTrustline {
-        PyTrustline {
+    fn set_authorized(&mut self, authorized: bool, peer_authorized: bool) {
+        self.inner.authorized = authorized;
+        self.inner.peer_authorized = peer_authorized;
+        self.inner.updated_at = Utc::now();
+    }
+
+    fn with_balance(&self, balance: f64) -> Self {
+        Self {
             inner: self.inner.clone().with_balance(balance),
         }
     }
 
-    fn with_authorized(&self, authorized: bool, peer_authorized: bool) -> PyTrustline {
-        PyTrustline {
+    fn with_authorized(&self, authorized: bool, peer_authorized: bool) -> Self {
+        Self {
             inner: self.inner.clone().with_authorized(authorized, peer_authorized),
         }
     }
 
     fn __repr__(&self) -> String {
         format!(
-            "Trustline({} -> {} | limit: {:?} | balance: {:?} | active: {})",
+            "Trustline(id={}, identity={}, asset={}, limit={:?}, balance={:?}, active={})",
+            self.inner.id,
             self.inner.identity_id,
             self.inner.asset,
             self.inner.limit,
             self.inner.balance,
             self.inner.is_active()
         )
+    }
+}
+
+// ============================================================
+// DATABASE PYTHON
+// ============================================================
+#[cfg(feature = "python")]
+#[pyclass]
+pub struct PyWalletDB {
+    inner: WalletDB,
+}
+
+#[cfg(feature = "python")]
+#[pymethods]
+impl PyWalletDB {
+    #[new]
+    fn new(path: &str) -> PyResult<Self> {
+        Ok(Self {
+            inner: WalletDB::new(path).map_err(|e| {
+                pyo3::exceptions::PyIOError::new_err(e.to_string())
+            })?,
+        })
+    }
+
+    // ---- IDENTITY ----
+
+    fn save_identity(&self, identity: &PyIdentity) -> PyResult<()> {
+        self.inner.save_identity(&identity.inner).map_err(|e| {
+            pyo3::exceptions::PyIOError::new_err(e.to_string())
+        })
+    }
+
+    fn get_identity(&self, id: &str) -> PyResult<Option<PyIdentity>> {
+        self.inner
+            .get_identity(id)
+            .map_err(|e| pyo3::exceptions::PyIOError::new_err(e.to_string()))
+            .map(|opt| opt.map(|id| PyIdentity { inner: id }))
+    }
+
+    fn get_identity_by_fingerprint(&self, fingerprint: &str) -> PyResult<Option<PyIdentity>> {
+        self.inner
+            .get_identity_by_fingerprint(fingerprint)
+            .map_err(|e| pyo3::exceptions::PyIOError::new_err(e.to_string()))
+            .map(|opt| opt.map(|id| PyIdentity { inner: id }))
+    }
+
+    fn list_identities(&self) -> PyResult<Vec<PyIdentity>> {
+        self.inner
+            .list_identities()
+            .map_err(|e| pyo3::exceptions::PyIOError::new_err(e.to_string()))
+            .map(|vec| vec.into_iter().map(|id| PyIdentity { inner: id }).collect())
+    }
+
+    fn delete_identity(&self, id: &str) -> PyResult<()> {
+        self.inner
+            .delete_identity(id)
+            .map_err(|e| pyo3::exceptions::PyIOError::new_err(e.to_string()))
+    }
+
+    // ---- TRUSTLINE ----
+
+    fn save_trustline(&self, trustline: &PyTrustline) -> PyResult<()> {
+        self.inner.save_trustline(&trustline.inner).map_err(|e| {
+            pyo3::exceptions::PyIOError::new_err(e.to_string())
+        })
+    }
+
+    fn get_trustline(&self, id: &str) -> PyResult<Option<PyTrustline>> {
+        self.inner
+            .get_trustline(id)
+            .map_err(|e| pyo3::exceptions::PyIOError::new_err(e.to_string()))
+            .map(|opt| opt.map(|tl| PyTrustline { inner: tl }))
+    }
+
+    fn get_trustlines_by_identity(&self, identity_id: &str) -> PyResult<Vec<PyTrustline>> {
+        self.inner
+            .get_trustlines_by_identity(identity_id)
+            .map_err(|e| pyo3::exceptions::PyIOError::new_err(e.to_string()))
+            .map(|vec| vec.into_iter().map(|tl| PyTrustline { inner: tl }).collect())
+    }
+
+    fn get_active_trustlines(&self, identity_id: &str) -> PyResult<Vec<PyTrustline>> {
+        self.inner
+            .get_active_trustlines(identity_id)
+            .map_err(|e| pyo3::exceptions::PyIOError::new_err(e.to_string()))
+            .map(|vec| vec.into_iter().map(|tl| PyTrustline { inner: tl }).collect())
+    }
+
+    fn has_trustline(&self, identity_id: &str, network: &str, asset_code: &str, issuer: Option<&str>) -> PyResult<bool> {
+        self.inner
+            .has_trustline(identity_id, network, asset_code, issuer)
+            .map_err(|e| pyo3::exceptions::PyIOError::new_err(e.to_string()))
+    }
+
+    fn delete_trustline(&self, id: &str) -> PyResult<()> {
+        self.inner
+            .delete_trustline(id)
+            .map_err(|e| pyo3::exceptions::PyIOError::new_err(e.to_string()))
+    }
+
+    fn delete_trustline_by_asset(&self, identity_id: &str, network: &str, asset_code: &str, issuer: Option<&str>) -> PyResult<()> {
+        self.inner
+            .delete_trustline_by_asset(identity_id, network, asset_code, issuer)
+            .map_err(|e| pyo3::exceptions::PyIOError::new_err(e.to_string()))
+    }
+
+    fn update_trustline_balance(&self, id: &str, balance: f64) -> PyResult<()> {
+        self.inner
+            .update_trustline_balance(id, balance)
+            .map_err(|e| pyo3::exceptions::PyIOError::new_err(e.to_string()))
+    }
+
+    fn update_trustline_limit(&self, id: &str, limit: f64) -> PyResult<()> {
+        self.inner
+            .update_trustline_limit(id, limit)
+            .map_err(|e| pyo3::exceptions::PyIOError::new_err(e.to_string()))
+    }
+
+    fn update_trustline_authorized(&self, id: &str, authorized: bool, peer_authorized: bool) -> PyResult<()> {
+        self.inner
+            .update_trustline_authorized(id, authorized, peer_authorized)
+            .map_err(|e| pyo3::exceptions::PyIOError::new_err(e.to_string()))
+    }
+}
+
+// ============================================================
+// NETWORK MANAGER PYTHON
+// ============================================================
+#[cfg(feature = "python")]
+#[pyclass]
+pub struct PyNetworkManager {
+    inner: NetworkManager,
+}
+
+#[cfg(feature = "python")]
+#[pymethods]
+impl PyNetworkManager {
+    #[new]
+    fn new() -> Self {
+        Self {
+            inner: NetworkManager::new(),
+        }
+    }
+
+    fn check_internet(&mut self) -> bool {
+        self.inner.check_internet()
     }
 }
 
@@ -737,51 +1078,84 @@ impl PyTrustline {
 #[pyfunction]
 fn create_wallet(db_path: &str, name: Option<&str>) -> PyResult<String> {
     let db = WalletDB::new(db_path)
-        .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(e.to_string()))?;
+        .map_err(|e| pyo3::exceptions::PyIOError::new_err(e.to_string()))?;
     let identity = Identity::generate();
 
     if let Some(n) = name {
         let mut id = identity;
         id.name = Some(n.to_string());
         db.save_identity(&id)
-            .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(e.to_string()))?;
+            .map_err(|e| pyo3::exceptions::PyIOError::new_err(e.to_string()))?;
         Ok(id.id)
     } else {
         db.save_identity(&identity)
-            .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(e.to_string()))?;
+            .map_err(|e| pyo3::exceptions::PyIOError::new_err(e.to_string()))?;
         Ok(identity.id)
     }
 }
 
-// 🔥 NUOVA FUNZIONE: crea una trustline
 #[cfg(feature = "python")]
 #[pyfunction]
-fn create_trustline(db_path: &str, identity_id: &str, network: &str, asset_code: &str, issuer: Option<&str>, limit: Option<f64>) -> PyResult<String> {
+fn create_trustline(
+    db_path: &str,
+    identity_id: &str,
+    network: &str,
+    asset_code: &str,
+    issuer: Option<&str>,
+    limit: Option<f64>,
+) -> PyResult<String> {
     let db = WalletDB::new(db_path)
-        .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(e.to_string()))?;
-    
-    let network_enum = match network {
-        "XRPL" => Network::XRPL,
-        "Stellar" => Network::Stellar,
-        "Bitcoin" => Network::Bitcoin,
-        "Ethereum" => Network::Ethereum,
-        "Monero" => Network::Monero,
-        _ => return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+        .map_err(|e| pyo3::exceptions::PyIOError::new_err(e.to_string()))?;
+
+    let network_enum = Network::from_str(network)
+        .ok_or_else(|| pyo3::exceptions::PyValueError::new_err(
             format!("Network non supportato: {}", network)
-        )),
-    };
-    
+        ))?;
+
     let asset = Asset::new(network_enum, asset_code, 6);
     let asset = if let Some(iss) = issuer {
         asset.with_issuer(iss)
     } else {
         asset
     };
-    
+
     let trustline = Trustline::new(identity_id, asset, limit);
-    
+
     db.save_trustline(&trustline)
-        .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(e.to_string()))?;
-    
+        .map_err(|e| pyo3::exceptions::PyIOError::new_err(e.to_string()))?;
+
     Ok(trustline.id)
+}
+
+#[cfg(feature = "python")]
+#[pyfunction]
+fn get_core_version() -> String {
+    "0.1.0".to_string()
+}
+
+// ============================================================
+// PYTHON MODULE
+// ============================================================
+#[cfg(feature = "python")]
+#[pymodule]
+fn wallet_core(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
+    m.add_class::<PyIdentity>()?;
+    m.add_class::<PyAsset>()?;
+    m.add_class::<PyWalletDB>()?;
+    m.add_class::<PyTrustline>()?;
+    m.add_class::<PyNetwork>()?;
+    m.add_class::<PyNetworkManager>()?;
+    m.add_function(wrap_pyfunction!(create_wallet, m)?)?;
+    m.add_function(wrap_pyfunction!(create_trustline, m)?)?;
+    m.add_function(wrap_pyfunction!(get_core_version, m)?)?;
+    m.add("__version__", "0.1.0")?;
+    Ok(())
+}
+
+// ============================================================
+// MAIN (per test)
+// ============================================================
+#[cfg(not(feature = "python"))]
+fn main() {
+    println!("Wallet Core - Built as rlib");
 }

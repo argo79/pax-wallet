@@ -93,18 +93,7 @@ read_version() {
 }
 
 # ============================================================
-# 3. NOME OUTPUT CON LINGUA
-# ============================================================
-
-APP_NAME="paxwallet-${LANG_TAG}"
-
-echo "=========================================="
-echo "📦 Build ${APP_NAME} v${CURRENT_VERSION}"
-echo "   Piattaforma: ${PLATFORM}"
-echo "=========================================="
-
-# ============================================================
-# 4. PULIZIA SOLO DEL TARGET (NON TUTTO!)
+# 3. PULIZIA SOLO DEL TARGET (NON TUTTO!)
 # ============================================================
 
 clean_target() {
@@ -129,7 +118,7 @@ clean_target() {
 }
 
 # ============================================================
-# 5. VERIFICA FILE DI BUILD
+# 4. VERIFICA FILE DI BUILD
 # ============================================================
 
 check_files() {
@@ -176,7 +165,7 @@ check_files() {
 }
 
 # ============================================================
-# 6. INSTALLA DIPENDENZE (ADATTATO PER PIATTAFORMA)
+# 5. INSTALLA DIPENDENZE (ADATTATO PER PIATTAFORMA)
 # ============================================================
 
 install_deps() {
@@ -209,7 +198,7 @@ install_deps() {
 }
 
 # ============================================================
-# 7. BUILD LINUX/ANDROID - SOLO TARGET
+# 6. BUILD LINUX/ANDROID - SOLO TARGET
 # ============================================================
 
 build_linux_android() {
@@ -268,7 +257,7 @@ build_linux_android() {
 }
 
 # ============================================================
-# 8. BUILD WINDOWS - SOLO TARGET
+# 7. BUILD WINDOWS - SOLO TARGET
 # ============================================================
 
 build_windows() {
@@ -330,7 +319,7 @@ build_windows() {
 }
 
 # ============================================================
-# 9. CREA SCRIPT PER WINDOWS NATIVO
+# 8. CREA SCRIPT PER WINDOWS NATIVO
 # ============================================================
 
 create_windows_script() {
@@ -434,7 +423,7 @@ EOF
 }
 
 # ============================================================
-# 10. VERSIONE PORTABLE - SOLO TARGET
+# 9. VERSIONE PORTABLE - SOLO TARGET
 # ============================================================
 
 create_portable() {
@@ -463,13 +452,16 @@ create_portable() {
 }
 
 # ============================================================
-# 11. MAIN
+# 10. MAIN
 # ============================================================
 
 main() {
     detect_platform
     select_language
     read_version
+    
+    # 🔥 APP_NAME DEFINITO QUI DOPO CHE LANG_TAG È STATO IMPOSTATO
+    APP_NAME="paxwallet-${LANG_TAG}"
     
     echo ""
     echo "=========================================="

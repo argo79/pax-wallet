@@ -48,17 +48,24 @@ except ImportError as e:
     STELLAR_IMPORT_ERROR = str(e)
     logging.warning(f"stellar-sdk not available: {e}")
 
+# 🔥 CORE RUST IMPORTS
+try:
+    import wallet_core as _rust
+    CORE_AVAILABLE = True
+    CORE_IMPORT_ERROR = None
+except ImportError as e:
+    CORE_AVAILABLE = False
+    CORE_IMPORT_ERROR = str(e)
+    logging.warning(f"wallet_core not available: {e}")
+
 # 🔥 DETERMINE EXECUTION DIRECTORY
 def get_app_dir() -> Path:
     """Get the execution directory of the program"""
     if getattr(sys, 'frozen', False):
-        # We are in a PyInstaller executable
         return Path(os.path.dirname(sys.executable))
     else:
-        # We are running as a script
         return Path(os.path.dirname(os.path.abspath(__file__)))
 
-# 🔥 DETERMINE IF ON TERMUX/ANDROID
 def is_termux() -> bool:
     """Check if running on Termux/Android"""
     if os.path.exists("/data/data/com.termux"):
@@ -67,20 +74,15 @@ def is_termux() -> bool:
         return True
     return False
 
-# 🔥 EXECUTION DIRECTORY
 APP_DIR = get_app_dir()
 
-# 🔥 IF ON TERMUX, USE EXECUTION DIRECTORY
 if is_termux():
     DATA_DIR = APP_DIR
     print(f"📱 Termux detected - Using directory: {DATA_DIR}")
 else:
     DATA_DIR = APP_DIR
 
-# 🔥 PERSISTENT DATA DIRECTORY
 DATA_DIR = Path(os.environ.get('XRPWALLET_DATA_DIR', str(DATA_DIR)))
-
-# Ensure directory exists
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 logger = logging.getLogger(__name__)
@@ -121,6 +123,75 @@ class WalletInfo:
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'WalletInfo':
         return cls(**data)
+
+
+@dataclass
+class CoreTrustlineInfo:
+    """Rappresentazione Python di una trustline dal Core Rust"""
+    id: str
+    identity_id: str
+    network: str
+    asset_code: str
+    asset_issuer: Optional[str]
+    decimals: int
+    limit: Optional[float]
+    balance: Optional[float]
+    authorized: bool
+    peer_authorized: bool
+    is_active: bool
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+    
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "identity_id": self.identity_id,
+            "network": self.network,
+            "asset_code": self.asset_code,
+            "asset_issuer": self.asset_issuer,
+            "decimals": self.decimals,
+            "limit": self.limit,
+            "balance": self.balance,
+            "authorized": self.authorized,
+            "peer_authorized": self.peer_authorized,
+            "is_active": self.is_active,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at
+        }
+    
+    @classmethod
+    def from_rust(cls, rust_trustline) -> 'CoreTrustlineInfo':
+        """Converte da PyTrustline a dataclass Python"""
+        try:
+            asset = rust_trustline.asset()
+            return cls(
+                id=rust_trustline.id(),
+                identity_id=rust_trustline.identity_id(),
+                network=str(asset.inner.network) if hasattr(asset, 'inner') else "XRPL",
+                asset_code=asset.inner.code if hasattr(asset, 'inner') else "UNKNOWN",
+                asset_issuer=asset.inner.issuer if hasattr(asset, 'inner') else None,
+                decimals=asset.inner.decimals if hasattr(asset, 'inner') else 6,
+                limit=rust_trustline.limit(),
+                balance=rust_trustline.balance(),
+                authorized=rust_trustline.authorized(),
+                peer_authorized=rust_trustline.peer_authorized(),
+                is_active=rust_trustline.is_active()
+            )
+        except Exception as e:
+            logger.error(f"Error converting trustline: {e}")
+            return cls(
+                id="unknown",
+                identity_id="unknown",
+                network="XRPL",
+                asset_code="UNKNOWN",
+                asset_issuer=None,
+                decimals=6,
+                limit=None,
+                balance=None,
+                authorized=False,
+                peer_authorized=False,
+                is_active=False
+            )
 
 
 class XamanSecretNumbersBridge:
@@ -200,9 +271,6 @@ class XamanSecretNumbersBridge:
     
     def _numbers_to_seed_nodejs(self, numbers: List[str]) -> str:
         """Conversion via Node.js with input validation"""
-        # ============================================================
-        # VALIDATE NUMBERS BEFORE USING IN COMMAND
-        # ============================================================
         if not numbers or len(numbers) != 8:
             raise ValueError(f"Need 8 numbers, got {len(numbers)}")
         
@@ -518,7 +586,7 @@ class StellarManager:
 
 
 class HybridXRPManager:
-    """Main manager for XRP and XLM wallets - USING ONLY LOCAL DIRECTORY"""
+    """Main manager for XRP and XLM wallets - WITH RUST CORE INTEGRATION"""
     
     def __init__(self, data_file: str = "wallet_data.json"):
         # 🔥 USE ONLY EXECUTION DIRECTORY
@@ -546,17 +614,242 @@ class HybridXRPManager:
         self.stellar_manager: Optional[StellarManager] = None
         self._bridge: Optional[XamanSecretNumbersBridge] = None
         
+        # 🔥 CORE RUST
+        self._core: Optional[Any] = None
+        self._core_identity_id: Optional[str] = None
+        self._core_initialized: bool = False
+        
         # 🔥 CREATE DIRECTORY IF NOT EXISTS
         self.data_file.parent.mkdir(parents=True, exist_ok=True)
         
         # Load saved wallet
         self.load()
+        
+        # 🔥 INIT CORE RUST
+        if CORE_AVAILABLE:
+            self._init_core()
     
     @property
     def bridge(self) -> XamanSecretNumbersBridge:
         if self._bridge is None:
             self._bridge = XamanSecretNumbersBridge()
         return self._bridge
+    
+    # ============================================================
+    # CORE RUST INTEGRATION
+    # ============================================================
+    
+    def _init_core(self) -> None:
+        """Initialize Rust core"""
+        if not CORE_AVAILABLE:
+            logger.warning("Core Rust not available")
+            return
+        
+        if self._core_initialized:
+            return
+        
+        try:
+            # Import core wrapper
+            from core_wrapper import create_core, CoreIntegration
+            
+            core_db_path = DATA_DIR / "wallet_core.db"
+            self._core = create_core(str(core_db_path))
+            self._core_integration = CoreIntegration(self._core)
+            self._core_initialized = True
+            
+            # Create identity if wallet loaded
+            if self.is_loaded():
+                self._sync_core_identity()
+            
+            logger.info(f"✅ Core Rust initialized at {core_db_path}")
+        except ImportError as e:
+            logger.warning(f"Core wrapper not available: {e}")
+            self._core_initialized = False
+        except Exception as e:
+            logger.error(f"Error initializing core: {e}")
+            self._core_initialized = False
+    
+    def _sync_core_identity(self) -> Optional[str]:
+        """Sync or create identity in core"""
+        if not self._core_initialized or not CORE_AVAILABLE:
+            return None
+        
+        try:
+            # Generate fingerprint from seed
+            fingerprint = self._get_core_fingerprint()
+            
+            if not fingerprint:
+                # Create new identity
+                identity_id = self._core.create_identity(f"Wallet_{int(time.time())}")
+                self._core_identity_id = identity_id
+                self._core_integration.set_identity(identity_id)
+                return identity_id
+            
+            # Check if identity exists
+            identities = self._core.list_identities()
+            for ident in identities:
+                if ident.get("fingerprint") == fingerprint:
+                    self._core_identity_id = ident["id"]
+                    self._core_integration.set_identity(ident["id"])
+                    return ident["id"]
+            
+            # Create new identity with fingerprint
+            identity_id = self._core.create_identity(f"Wallet_{fingerprint[:8]}")
+            self._core_identity_id = identity_id
+            self._core_integration.set_identity(identity_id)
+            return identity_id
+            
+        except Exception as e:
+            logger.error(f"Error syncing core identity: {e}")
+            return None
+    
+    def _get_core_fingerprint(self) -> Optional[str]:
+        """Generate fingerprint for core identity"""
+        if self.seed_phrase:
+            return hashlib.sha256(self.seed_phrase.encode()).hexdigest()[:16]
+        elif self.base_seed_xrp:
+            return hashlib.sha256(self.base_seed_xrp.encode()).hexdigest()[:16]
+        elif self.base_seed_stellar:
+            return hashlib.sha256(self.base_seed_stellar.encode()).hexdigest()[:16]
+        elif self.base_private:
+            return hashlib.sha256(self.base_private).hexdigest()[:16]
+        return None
+    
+    def get_core_identity(self) -> Optional[str]:
+        """Get current core identity ID"""
+        if not self._core_initialized:
+            return None
+        return self._core_identity_id
+    
+    def sync_trustlines_with_core(self) -> List[CoreTrustlineInfo]:
+        """Sync trustlines from wallet_manager to core"""
+        if not self._core_initialized or not CORE_AVAILABLE:
+            return []
+        
+        identity_id = self.get_core_identity()
+        if not identity_id:
+            identity_id = self._sync_core_identity()
+            if not identity_id:
+                return []
+        
+        try:
+            # Get trustlines from ledger
+            trustlines = self.get_trustlines(force_refresh=True)
+            
+            # Delete existing trustlines
+            existing = self._core.get_trustlines(identity_id)
+            for tl in existing:
+                self._core.delete_trustline(tl.id)
+            
+            # Create new trustlines
+            results = []
+            for tl_data in trustlines:
+                network = tl_data.get("network", "XRPL")
+                if network == "Stellar":
+                    network = "Stellar"
+                else:
+                    network = "XRPL"
+                
+                asset_code = tl_data.get("currency") or tl_data.get("asset_code")
+                issuer = tl_data.get("issuer") or tl_data.get("asset_issuer")
+                limit = tl_data.get("limit")
+                balance = tl_data.get("balance")
+                
+                if not asset_code or not issuer:
+                    continue
+                
+                try:
+                    rust_id = self._core.create_trustline(
+                        identity_id,
+                        network,
+                        asset_code,
+                        issuer,
+                        limit
+                    )
+                    
+                    # Update balance if available
+                    if balance is not None:
+                        self._core.update_trustline_balance(rust_id, float(balance))
+                    
+                    # Get trustline info
+                    tl_info = self._core.get_trustline(rust_id)
+                    if tl_info:
+                        results.append(CoreTrustlineInfo.from_rust(tl_info))
+                        
+                except Exception as e:
+                    logger.error(f"Error syncing trustline {asset_code}: {e}")
+            
+            return results
+            
+        except Exception as e:
+            logger.error(f"Error syncing trustlines: {e}")
+            return []
+    
+    def get_core_trustlines(self) -> List[CoreTrustlineInfo]:
+        """Get trustlines from core"""
+        if not self._core_initialized or not CORE_AVAILABLE:
+            return []
+        
+        identity_id = self.get_core_identity()
+        if not identity_id:
+            return []
+        
+        try:
+            trustlines = self._core.get_trustlines(identity_id)
+            return [CoreTrustlineInfo.from_rust(tl) for tl in trustlines]
+        except Exception as e:
+            logger.error(f"Error getting core trustlines: {e}")
+            return []
+    
+    def create_trustline_with_core(self, asset_code: str, issuer: str, limit: float = None) -> Dict:
+        """Create trustline and sync with core"""
+        # Create on ledger
+        result = self.set_trustline(asset_code, issuer, limit)
+        
+        if not result.get("success"):
+            return result
+        
+        # Sync with core
+        if self._core_initialized and CORE_AVAILABLE:
+            identity_id = self.get_core_identity()
+            if identity_id:
+                try:
+                    network = "Stellar" if self.crypto_type == "XLM" else "XRPL"
+                    rust_id = self._core.create_trustline(
+                        identity_id,
+                        network,
+                        asset_code,
+                        issuer,
+                        limit
+                    )
+                    result["core_id"] = rust_id
+                    logger.info(f"Trustline saved to core: {rust_id}")
+                except Exception as e:
+                    logger.error(f"Error saving trustline to core: {e}")
+                    result["core_error"] = str(e)
+        
+        return result
+    
+    def delete_trustline_from_core(self, asset_code: str, issuer: str) -> bool:
+        """Delete trustline from core"""
+        if not self._core_initialized or not CORE_AVAILABLE:
+            return False
+        
+        identity_id = self.get_core_identity()
+        if not identity_id:
+            return False
+        
+        try:
+            trustlines = self._core.get_trustlines(identity_id)
+            for tl in trustlines:
+                if tl.asset_code == asset_code and tl.asset_issuer == issuer:
+                    self._core.delete_trustline(tl.id)
+                    logger.info(f"Trustline deleted from core: {tl.id}")
+                    return True
+            return False
+        except Exception as e:
+            logger.error(f"Error deleting trustline from core: {e}")
+            return False
     
     # ============================================================
     # PRIVATE METHODS
@@ -702,6 +995,10 @@ class HybridXRPManager:
         
         self.save()
         
+        # Sync with core
+        if CORE_AVAILABLE:
+            self._sync_core_identity()
+        
         return {
             "seed_type": SeedType.BIP39.value,
             "seed_phrase": self.seed_phrase,
@@ -735,6 +1032,10 @@ class HybridXRPManager:
         
         self.save()
         
+        # Sync with core
+        if CORE_AVAILABLE:
+            self._sync_core_identity()
+        
         return {
             "seed_type": SeedType.BIP39.value,
             "seed_phrase": seed_phrase,
@@ -765,6 +1066,10 @@ class HybridXRPManager:
         self._correct_address = address
         
         self.save()
+        
+        # Sync with core
+        if CORE_AVAILABLE:
+            self._sync_core_identity()
         
         return {
             "seed_type": SeedType.NUMBERS.value,
@@ -814,23 +1119,25 @@ class HybridXRPManager:
         
         if input_type == SeedType.BIP39.value:
             if self.crypto_type == "XLM":
-                return self._import_bip39_as_stellar(seed_input, passphrase)
-            return self._import_bip39(seed_input, passphrase)
-        
+                result = self._import_bip39_as_stellar(seed_input, passphrase)
+            else:
+                result = self._import_bip39(seed_input, passphrase)
         elif input_type == SeedType.NUMBERS.value:
-            return self._import_numbers(seed_input)
-        
+            result = self._import_numbers(seed_input)
         elif input_type == SeedType.PRIVATE_KEY.value:
-            return self._import_private_key(seed_input)
-        
+            result = self._import_private_key(seed_input)
         elif input_type == SeedType.XRP_SEED.value:
-            return self._import_xrp_seed(seed_input)
-        
+            result = self._import_xrp_seed(seed_input)
         elif input_type == SeedType.STELLAR_SEED.value:
-            return self._import_stellar_seed(seed_input)
-        
+            result = self._import_stellar_seed(seed_input)
         else:
             raise ValueError(f"Unsupported type: {input_type}")
+        
+        # Sync with core after import
+        if CORE_AVAILABLE:
+            self._sync_core_identity()
+        
+        return result
     
     def _import_bip39(self, seed_phrase: str, passphrase: str = "") -> Dict[str, Any]:
         if not self.mnemo.check(seed_phrase):
@@ -1448,41 +1755,6 @@ class HybridXRPManager:
         except Exception as e:
             return {"success": False, "error": str(e)}
 
-    def _save_trustline_to_core(self, asset_code: str, issuer: str, limit: str, tx_hash: str, network: str = "mainnet"):
-        """Save trustline to Rust core database"""
-        try:
-            import wallet_core
-            
-            core_db_path = DATA_DIR / "wallet_core.db"
-            db = wallet_core.PyWalletDB(str(core_db_path))
-            
-            identity_id = hashlib.sha256(self.base_private).hexdigest()[:16] if self.base_private else "unknown"
-            
-            network_map = {
-                "mainnet": "XRPL",
-                "testnet": "XRPL",
-                "devnet": "XRPL"
-            }
-            network_rust = network_map.get(network, "XRPL")
-            
-            asset = wallet_core.PyAsset()
-            
-            trustline = wallet_core.PyTrustline(
-                identity_id=identity_id,
-                asset=asset,
-                limit=float(limit) if limit else None
-            )
-            
-            db.save_trustline(trustline)
-            print(f"✅ Trustline saved to Rust core (DB: {core_db_path})")
-            print(f"   ID: {trustline.id()}")
-            print(f"   Asset: {asset_code}")
-            print(f"   Issuer: {issuer}")
-            print(f"   Limit: {limit}")
-            
-        except Exception as e:
-            print(f"⚠️ Error saving trustline to core: {e}")
-
     def _set_xlm_trustline(self, asset_code: str, issuer: str, limit: float = None) -> Dict:
         """Create trustline on Stellar (ChangeTrust)"""
         self._init_stellar()
@@ -1518,8 +1790,6 @@ class HybridXRPManager:
             
             tx_hash = response.get("hash", "unknown")
             
-            self._save_trustline_to_core(asset_code, issuer, limit_value, tx_hash, self.network)
-            
             return {
                 "success": True,
                 "hash": tx_hash,
@@ -1535,7 +1805,13 @@ class HybridXRPManager:
 
     def remove_trustline(self, asset_code: str, issuer: str) -> Dict:
         """Remove a trustline (set limit = 0)"""
-        return self.set_trustline(asset_code, issuer, 0)
+        result = self.set_trustline(asset_code, issuer, 0)
+        
+        # Delete from core
+        if result.get("success"):
+            self.delete_trustline_from_core(asset_code, issuer)
+        
+        return result
 
     def get_trustline_balance(self, asset_code: str, issuer: str = None) -> Dict:
         """Get balance of a specific trustline"""
@@ -1708,7 +1984,9 @@ class HybridXRPManager:
             "crypto_type": self.crypto_type,
             "network": self.network,
             "address": self._correct_address,
-            "has_balance": False
+            "has_balance": False,
+            "has_core": CORE_AVAILABLE and self._core_initialized,
+            "core_identity": self._core_identity_id
         }
         
         try:
@@ -1750,6 +2028,14 @@ class HybridXRPManager:
                 "seed_stellar": self.base_seed_stellar,
             })
         
+        # Add core trustlines count
+        if CORE_AVAILABLE and self._core_initialized:
+            try:
+                core_tls = self.get_core_trustlines()
+                info["core_trustlines"] = len(core_tls)
+            except:
+                pass
+        
         return info
     
     def reset(self) -> None:
@@ -1764,6 +2050,9 @@ class HybridXRPManager:
         self._derived_wallets = {}
         self._balance_cache = {}
         self.stellar_manager = None
+        
+        # Reset core
+        self._core_identity_id = None
         
         if self.data_file.exists():
             self.data_file.unlink()
@@ -1866,6 +2155,12 @@ class HybridXRPManager:
                     logger.warning(f"Error loading derived wallet: {e}")
             
             logger.info(f"✅ Wallet loaded from {self.data_file}")
+            
+            # Sync with core after load
+            if CORE_AVAILABLE:
+                self._init_core()
+                self._sync_core_identity()
+            
             return True
             
         except Exception as e:
@@ -1911,5 +2206,17 @@ if __name__ == "__main__":
     addresses = manager.derive_addresses("test", 3)
     for addr in addresses:
         print(f"  - {addr.address}")
+    
+    # Test core integration
+    if CORE_AVAILABLE:
+        print("\n🔗 Testing core integration...")
+        identity = manager.get_core_identity()
+        print(f"  Core Identity: {identity}")
+        
+        trustlines = manager.sync_trustlines_with_core()
+        print(f"  Trustlines synced: {len(trustlines)}")
+        
+        core_tls = manager.get_core_trustlines()
+        print(f"  Trustlines in core: {len(core_tls)}")
     
     print("\n✅ Test complete!")
