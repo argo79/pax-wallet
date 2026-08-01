@@ -675,36 +675,23 @@ class HybridXRPManager:
             return None
         
         try:
-            # Generate fingerprint from seed
             fingerprint = self._get_core_fingerprint()
             
             if not fingerprint:
-                # Create new identity
                 identity_id = self._core.create_identity(f"Wallet_{int(time.time())}")
                 self._core_identity_id = identity_id
-                if hasattr(self, '_core_integration') and self._core_integration:
-                    self._core_integration.set_identity(identity_id)
                 return identity_id
             
-            # Check if identity exists
             identities = self._core.list_identities()
-            # 🔥 VERIFICA CHE identities SIA UNA LISTA
+            
             if isinstance(identities, list):
                 for ident in identities:
                     if isinstance(ident, dict) and ident.get("fingerprint") == fingerprint:
                         self._core_identity_id = ident["id"]
-                        if hasattr(self, '_core_integration') and self._core_integration:
-                            self._core_integration.set_identity(ident["id"])
                         return ident["id"]
-            else:
-                # Se identities non è una lista, logga e continua
-                logger.warning(f"list_identities returned: {type(identities)}")
             
-            # Create new identity with fingerprint
             identity_id = self._core.create_identity(f"Wallet_{fingerprint[:8]}")
             self._core_identity_id = identity_id
-            if hasattr(self, '_core_integration') and self._core_integration:
-                self._core_integration.set_identity(identity_id)
             return identity_id
             
         except Exception as e:

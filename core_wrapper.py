@@ -141,16 +141,26 @@ class CoreWallet:
         return None
     
     def list_identities(self) -> List[Dict[str, str]]:
-        """Lista tutte le identità"""
-        # TODO: Implementare query SQL "SELECT * FROM identities"
-        # Per ora, restituisce solo quella corrente
-        if self._current_identity:
-            return [{
-                "id": self._current_identity.id(),
-                "name": self._current_identity.name(),
-                "fingerprint": self._current_identity.fingerprint()
-            }]
-        return []
+        """Lista tutte le identità - USA SQLITE DIRETTO"""
+        try:
+            import sqlite3
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            # Verifica che la tabella esista
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='identities'")
+            if not cursor.fetchone():
+                conn.close()
+                return []
+            
+            cursor.execute("SELECT id, name, fingerprint FROM identities")
+            rows = cursor.fetchall()
+            conn.close()
+            
+            return [{"id": r[0], "name": r[1] or "", "fingerprint": r[2]} for r in rows]
+        except Exception as e:
+            logger.error(f"Error listing identities: {e}")
+            return []
     
     def delete_identity(self, identity_id: str) -> bool:
         """Elimina un'identità e tutte le sue trustline"""
