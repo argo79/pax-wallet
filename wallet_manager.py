@@ -588,7 +588,7 @@ class StellarManager:
 class HybridXRPManager:
     """Main manager for XRP and XLM wallets - WITH RUST CORE INTEGRATION"""
     
-    def __init__(self, data_file: str = "wallet_data.json"):
+    def __init__(self, data_file: str = "wallet_data.json", password: str = None):
         # 🔥 USE ONLY EXECUTION DIRECTORY
         self.data_file = DATA_DIR / data_file
         self.mnemo = Mnemonic("english")
@@ -605,6 +605,9 @@ class HybridXRPManager:
         self.network: str = "testnet"
         self.crypto_type: str = "XRP"
         
+        # 🔥 PASSWORD PER CIFRATURA
+        self._wallet_password: Optional[str] = password
+        
         # Cache and derived data
         self._derived_wallets: Dict[str, WalletInfo] = {}
         self._balance_cache: Dict[str, Tuple[float, float]] = {}
@@ -618,6 +621,7 @@ class HybridXRPManager:
         self._core: Optional[Any] = None
         self._core_identity_id: Optional[str] = None
         self._core_initialized: bool = False
+        self._core_integration: Optional[Any] = None
         
         # 🔥 CREATE DIRECTORY IF NOT EXISTS
         self.data_file.parent.mkdir(parents=True, exist_ok=True)
@@ -669,6 +673,63 @@ class HybridXRPManager:
             logger.error(f"Error initializing core: {e}")
             self._core_initialized = False
     
+    def _decrypt_db_if_needed(self, db_path: str) -> bool:
+        """Decifra un DB se esiste il file .enc"""
+        try:
+            from core_wrapper import is_encrypted_file, decrypt_file
+        except ImportError:
+            return False
+        
+        enc_path = f"{db_path}.enc"
+        if not os.path.exists(enc_path):
+            return False
+        
+        if not is_encrypted_file(enc_path):
+            return False
+        
+        if not self._wallet_password:
+            print(f"❌ DB encrypted but no password: {db_path}")
+            return False
+        
+        temp_path = f"{db_path}.tmp"
+        try:
+            decrypt_file(enc_path, self._wallet_password, temp_path)
+            if os.path.exists(db_path):
+                os.remove(db_path)
+            os.rename(temp_path, db_path)
+            return True
+        except Exception as e:
+            print(f"❌ Error decrypting {db_path}: {e}")
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+            return False
+
+    def _encrypt_db(self, db_path: str) -> bool:
+        """Cifra un DB esistente"""
+        try:
+            from core_wrapper import encrypt_file
+        except ImportError:
+            return False
+        
+        if not self._wallet_password:
+            return False
+        
+        if not os.path.exists(db_path):
+            return False
+        
+        enc_path = f"{db_path}.enc"
+        if os.path.exists(enc_path):
+            return True
+        
+        try:
+            encrypt_file(db_path, self._wallet_password)
+            if os.path.exists(db_path):
+                os.remove(db_path)
+            return True
+        except Exception as e:
+            print(f"❌ Error encrypting {db_path}: {e}")
+            return False
+
     def _sync_core_identity(self) -> Optional[str]:
         """Sync or create identity in core"""
         if not self._core_initialized or not CORE_AVAILABLE:
@@ -2087,6 +2148,14 @@ class HybridXRPManager:
         # Reset core
         self._core_identity_id = None
         
+        # 🔥 PULISCI I FILE CIFRATI
+        for db in ["wallet_core.db", "wallet_cli.db"]:
+            enc_path = f"{db}.enc"
+            if os.path.exists(enc_path):
+                os.remove(enc_path)
+            if os.path.exists(db):
+                os.remove(db)
+        
         if self.data_file.exists():
             self.data_file.unlink()
     
@@ -2118,8 +2187,31 @@ class HybridXRPManager:
         }
         
         self.data_file.parent.mkdir(parents=True, exist_ok=True)
-        with open(self.data_file, "w") as f:
-            json.dump(data, f, indent=2)
+        
+        # 🔥 SALVA CIFRATO SE C'È UNA PASSWORD
+        try:
+            from core_wrapper import encrypt_wallet, is_encrypted_wallet
+            
+            if self._wallet_password:
+                json_str = json.dumps(data, indent=2, default=str)
+                encrypted = encrypt_wallet(json_str, self._wallet_password)
+                with open(self.data_file, "w") as f:
+                    f.write(encrypted)
+                print(f"✅ Wallet saved (ENCRYPTED) to {self.data_file}")
+            else:
+                with open(self.data_file, "w") as f:
+                    json.dump(data, f, indent=2)
+                print(f"✅ Wallet saved (UNENCRYPTED) to {self.data_file}")
+        except Exception as e:
+            # Fallback: salva in chiaro
+            print(f"⚠️ Encryption error: {e}, saving unencrypted")
+            with open(self.data_file, "w") as f:
+                json.dump(data, f, indent=2)
+        
+        # 🔥 CIFRA I DB SQLITE
+        if self._wallet_password:
+            for db in ["wallet_core.db", "wallet_cli.db"]:
+                self._encrypt_db(db)
         
         logger.info(f"✅ Wallet saved to {self.data_file}")
     
@@ -2128,8 +2220,26 @@ class HybridXRPManager:
             return False
         
         try:
-            with open(self.data_file) as f:
-                data = json.load(f)
+            # 🔥 SE IL FILE È CIFRATO, DECIFRALO PRIMA DI LEGGERLO
+            if self._wallet_password:
+                try:
+                    from core_wrapper import is_encrypted_file, decrypt_file
+                    if is_encrypted_file(str(self.data_file)):
+                        temp_path = str(self.data_file) + ".tmp"
+                        decrypt_file(str(self.data_file), self._wallet_password, temp_path)
+                        # Leggi dal file decifrato
+                        with open(temp_path, 'r') as f:
+                            data = json.load(f)
+                        os.remove(temp_path)
+                    else:
+                        with open(self.data_file) as f:
+                            data = json.load(f)
+                except ImportError:
+                    with open(self.data_file) as f:
+                        data = json.load(f)
+            else:
+                with open(self.data_file) as f:
+                    data = json.load(f)
             
             self.seed_type = data.get("seed_type")
             self.seed_phrase = data.get("seed_phrase")
@@ -2188,6 +2298,11 @@ class HybridXRPManager:
                     logger.warning(f"Error loading derived wallet: {e}")
             
             logger.info(f"✅ Wallet loaded from {self.data_file}")
+            
+            # 🔥 DECIFRA I DB SQLITE SE NECESSARIO
+            if self._wallet_password:
+                for db in ["wallet_core.db", "wallet_cli.db"]:
+                    self._decrypt_db_if_needed(db)
             
             # Sync with core after load
             if CORE_AVAILABLE:

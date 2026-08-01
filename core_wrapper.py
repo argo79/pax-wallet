@@ -15,6 +15,38 @@ import json
 # 1. CARICA IL CORE RUST
 # ============================================================
 
+def encrypt_wallet(plaintext: str, password: str) -> str:
+    """Cifra un JSON con AES-256-GCM via Rust"""
+    return _rust.encrypt_wallet(plaintext, password)
+
+def decrypt_wallet(encrypted: str, password: str) -> str:
+    """Decifra e restituisce il JSON"""
+    return _rust.decrypt_wallet(encrypted, password)
+
+def is_encrypted_wallet(data: str) -> bool:
+    """Verifica se il dato è cifrato"""
+    return _rust.is_encrypted_wallet(data)
+
+def encrypt_db_bytes(data: bytes, password: str) -> str:
+    """Cifra bytes di un DB con AES-256-GCM via Rust"""
+    return _rust.encrypt_db_bytes(data, password)
+
+def decrypt_db_bytes(encrypted: str, password: str) -> bytes:
+    """Decifra bytes di un DB"""
+    return _rust.decrypt_db_bytes(encrypted, password)
+
+def encrypt_file(path: str, password: str) -> bool:
+    """Cifra un file intero (crea path.enc)"""
+    return _rust.encrypt_file(path, password)
+
+def decrypt_file(enc_path: str, password: str, output_path: str) -> bool:
+    """Decifra un file .enc in output_path"""
+    return _rust.decrypt_file(enc_path, password, output_path)
+
+def is_encrypted_file(path: str) -> bool:
+    """Verifica se un file è cifrato"""
+    return _rust.is_encrypted_file(path)
+
 def get_core_path() -> Path:
     """Trova il percorso del modulo core compilato"""
     possible_paths = [

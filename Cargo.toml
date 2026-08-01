@@ -27,7 +27,9 @@ chacha20 = "0.9"
 pbkdf2 = "0.12"
 hmac = "0.12"
 hkdf = "0.12"
-
+# ========== CRITTOGRAFIA PER CIFRATURA ==========
+aes-gcm = "0.10"
+base64 = "0.21"
 # ========== DATABASE ==========
 rusqlite = { version = "0.30", features = ["bundled"] }
 

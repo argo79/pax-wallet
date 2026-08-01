@@ -112,7 +112,7 @@ def print_bold(msg): print(f"{Colors.BOLD}{msg}{Colors.RESET}")
 # ============================================================
 
 class WalletCLI:
-    def __init__(self):
+    def __init__(self, password: str = None):
         self.wallet: Optional[UnifiedWallet] = None
         self.data_file = "wallet_cli.db"
         self.wallets_dir = Path("wallets")
@@ -120,6 +120,9 @@ class WalletCLI:
         self.active_wallet_name_file = Path("active_wallet.txt")
         self.rubrica_file = Path("rubrica.json")
         self._interactive_mode = False
+        
+        self._wallet_password = password
+        self._password_verified = bool(password)
         
         # ============================================================
         # RETICULUM - SINGLETON PER TUTTA LA SESSIONE
@@ -327,7 +330,7 @@ class WalletCLI:
         try:
             dest.resolve().relative_to(self.wallets_dir.resolve())
         except ValueError:
-            print_red(f"❌ Percorso non valido: {dest}")
+            print_red(f"❌ Invalid path: {dest}")
             return False
         
         correct_address = manager._correct_address
@@ -352,35 +355,61 @@ class WalletCLI:
             "derived_wallets": [info.to_dict() for info in manager._derived_wallets.values()]
         }
         
-        with open(dest, 'w') as f:
-            json.dump(data, f, indent=2)
+        # 🔥 SALVA SEMPRE CIFRATO
+        try:
+            from core_wrapper import encrypt_wallet
+            
+            json_str = json.dumps(data, indent=2, default=str)
+            encrypted = encrypt_wallet(json_str, self._wallet_password)
+            with open(dest, 'w') as f:
+                f.write(encrypted)
+            
+            print_green(f"✅ Wallet '{name}' saved (ENCRYPTED)")
+        except Exception as e:
+            print_red(f"❌ Encryption error: {e}")
+            return False
         
-        print_green(f"✅ Wallet '{name}' salvato con indirizzo: {correct_address}")
-        print_yellow(f"🌐 Rete salvata: {manager.network.upper()}")
-        print_yellow(f"🪙 Crypto salvata: {manager.crypto_type}")
+        print_yellow(f"🌐 Network saved: {manager.network.upper()}")
+        print_yellow(f"🪙 Crypto saved: {manager.crypto_type}")
         return True
     
     def _switch_wallet(self, name: str) -> bool:
-        """Cambia il wallet attivo con quello specificato"""
-        # VALIDA IL NOME PRIMA DI USARLO
+        """Switch to the specified wallet"""
         if not self._validate_wallet_name(name):
             return False
         
         source = self.wallets_dir / f"{name}.json"
         
-        # Path traversal protection
         try:
             source.resolve().relative_to(self.wallets_dir.resolve())
         except ValueError:
-            print_red(f"❌ Percorso non valido: {source}")
+            print_red(f"❌ Invalid path: {source}")
             return False
         
         if not source.exists():
             return False
         
         try:
+            from core_wrapper import encrypt_wallet, decrypt_wallet, is_encrypted_wallet
+            
             with open(source, 'r') as f:
-                wallet_data = json.load(f)
+                content = f.read().strip()
+            
+            # 🔥 DECIFRA
+            if is_encrypted_wallet(content):
+                if not self._wallet_password:
+                    print_red("❌ Wallet encrypted but no password!")
+                    return False
+                json_str = decrypt_wallet(content, self._wallet_password)
+                wallet_data = json.loads(json_str)
+            else:
+                # Se non è cifrato, lo cifra subito
+                with open(source, 'r') as f:
+                    data = json.load(f)
+                encrypted = encrypt_wallet(json.dumps(data, indent=2, default=str), self._wallet_password)
+                with open(source, 'w') as f:
+                    f.write(encrypted)
+                wallet_data = data
             
             manager = self.wallet._xrp_manager
             
@@ -412,13 +441,13 @@ class WalletCLI:
             
             self._set_active_wallet_name(name)
             
-            print_green(f"✅ Wallet cambiato a: {name}")
-            print_yellow(f"🌐 Rete: {saved_network.upper()}")
+            print_green(f"✅ Switched to wallet: {name}")
+            print_yellow(f"🌐 Network: {saved_network.upper()}")
             print_yellow(f"🪙 Crypto: {saved_crypto}")
             return True
             
         except Exception as e:
-            print_red(f"❌ Errore nel cambio wallet: {e}")
+            print_red(f"❌ Error switching wallet: {e}")
             return False
 
     def _get_wallet_network(self) -> str:
@@ -459,7 +488,32 @@ class WalletCLI:
                             print_yellow(f"🪙 Crypto impostata a: {saved_crypto}")
                 except:
                     pass
+    def _encrypt_data(self, data: Dict[str, Any]) -> str:
+        """Cifra dati JSON con password"""
+        from core_wrapper import encrypt_wallet
+        
+        if not self._wallet_password:
+            raise ValueError("Password required for encryption")
+        
+        json_str = json.dumps(data, indent=2, default=str)
+        return encrypt_wallet(json_str, self._wallet_password)
     
+    def _decrypt_data(self, content: str) -> Optional[Dict[str, Any]]:
+        """Decifra dati JSON con password"""
+        from core_wrapper import decrypt_wallet, is_encrypted_wallet
+        
+        if not content:
+            return None
+        
+        if not self._wallet_password:
+            raise ValueError("Password required for decryption")
+        
+        if is_encrypted_wallet(content):
+            json_str = decrypt_wallet(content, self._wallet_password)
+            return json.loads(json_str)
+        else:
+            return json.loads(content)
+
     def cmd_remove_wallet(self):
         """Rimuovi un wallet dalla lista"""
         wallets = self._get_wallet_list()
@@ -770,6 +824,13 @@ class WalletCLI:
             return None
         
         # ============================================================
+        # 🔥 CONTROLLA INPUT VUOTO - SE TUTTO VUOTO, NON CREARE
+        # ============================================================
+        if not name or name.strip() == "":
+            print_red("❌ Wallet name cannot be empty")
+            return None
+        
+        # ============================================================
         # 🔥 VALIDA CRYPTO
         # ============================================================
         crypto = crypto.upper()
@@ -813,7 +874,7 @@ class WalletCLI:
             print_cyan("   🔐 Using 24 words (maximum security)")
         
         # ============================================================
-        # 🔥 CHIEDE PASSPHRASE (OSCURATA)
+        # 🔥 CHIEDE PASSPHRASE (OSCURATA) - SENZA y/N
         # ============================================================
         print("")
         print("   🔐 Passphrase (optional, press Enter to skip):")
@@ -2574,7 +2635,39 @@ class WalletCLI:
 
 def interactive_mode():
     """Modalità interattiva con Reticulum sempre attivo"""
-    cli = WalletCLI()
+    
+    # ============================================================
+    # 🔐 CHIEDE PASSWORD ALL'AVVIO - SEMPRE
+    # ============================================================
+    import getpass
+    
+    print("\n" + "=" * 60)
+    print("  🔐 PAX WALLET - UNLOCK")
+    print("=" * 60)
+    print("")
+    print("   Inserisci la password per sbloccare il wallet.")
+    print("   (Se è la prima volta, crea una nuova password)")
+    print("")
+    
+    while True:
+        password = getpass.getpass("🔐 Password: ")
+        if not password:
+            print_red("❌ La password non può essere vuota")
+            continue
+        
+        confirm = getpass.getpass("   Conferma password: ")
+        if confirm != password:
+            print_red("❌ Le password non corrispondono")
+            continue
+        
+        break
+    
+    cli = WalletCLI(password=password)
+    
+    # Passa la password al manager
+    if cli.wallet and cli.wallet._xrp_manager:
+        cli.wallet._xrp_manager._wallet_password = password
+    
     cli.init()
     cli._interactive_mode = True
     
@@ -2583,6 +2676,7 @@ def interactive_mode():
     print_bold("=" * 60)
     print("")
     print_green("📡 Reticulum attivo per tutta la sessione")
+    print_green("🔐 Wallet cifrato con AES-256-GCM")
     
     try:
         while True:
@@ -2599,6 +2693,7 @@ def interactive_mode():
             print(" 10) Trustline")
             print(" 11) Invia token")
             print(" 12) Reticulum")
+            print(" 13) Cambia password")
             print("  0) Esci")
             
             # Mostra stato Reticulum
@@ -2860,6 +2955,42 @@ def interactive_mode():
                         cli.cmd_test_gateways()
                     else:
                         print_red("❌ Scelta non valida")
+            
+            # ============================================================
+            # 13) CAMBIA PASSWORD
+            # ============================================================
+            elif choice == '13':
+                import getpass
+                print("\n🔐 CAMBIA PASSWORD")
+                print("=" * 40)
+                old = getpass.getpass("Password attuale: ")
+                if old != cli._wallet_password:
+                    print_red("❌ Password errata")
+                else:
+                    new = getpass.getpass("Nuova password: ")
+                    confirm = getpass.getpass("Conferma password: ")
+                    if new != confirm:
+                        print_red("❌ Le password non corrispondono")
+                    else:
+                        cli._wallet_password = new
+                        if cli.wallet and cli.wallet._xrp_manager:
+                            cli.wallet._xrp_manager._wallet_password = new
+                        # Ricifra tutti i wallet
+                        wallets = cli._get_wallet_list()
+                        for w in wallets:
+                            wallet_file = cli.wallets_dir / f"{w['name']}.json"
+                            if wallet_file.exists():
+                                with open(wallet_file, 'r') as f:
+                                    content = f.read().strip()
+                                try:
+                                    data = cli._decrypt_data(content)
+                                    if data:
+                                        encrypted = cli._encrypt_data(data)
+                                        with open(wallet_file, 'w') as f:
+                                            f.write(encrypted)
+                                except:
+                                    pass
+                        print_green("✅ Password cambiata con successo!")
             
             else:
                 print_red("❌ Scelta non valida")

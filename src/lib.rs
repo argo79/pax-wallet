@@ -12,6 +12,8 @@ use rand::Rng;
 //use std::sync::Mutex;
 use std::path::Path;
 
+mod crypto;
+
 // ============================================================
 // NETWORKING
 // ============================================================
@@ -1133,6 +1135,73 @@ fn get_core_version() -> String {
     "0.1.0".to_string()
 }
 
+#[cfg(feature = "python")]
+#[pyfunction]
+fn encrypt_wallet(plaintext: &str, password: &str) -> PyResult<String> {
+    Ok(crypto::encrypt(plaintext, password))
+}
+
+#[cfg(feature = "python")]
+#[pyfunction]
+fn decrypt_wallet(encrypted: &str, password: &str) -> PyResult<String> {
+    crypto::decrypt(encrypted, password)
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e))
+}
+
+#[cfg(feature = "python")]
+#[pyfunction]
+fn is_encrypted_wallet(data: &str) -> bool {
+    crypto::is_encrypted(data)
+}
+
+#[cfg(feature = "python")]
+#[pyfunction]
+fn encrypt_db_bytes(data: Vec<u8>, password: &str) -> PyResult<String> {
+    Ok(crypto::encrypt_bytes(&data, password))
+}
+
+#[cfg(feature = "python")]
+#[pyfunction]
+fn decrypt_db_bytes(encrypted: &str, password: &str) -> PyResult<Vec<u8>> {
+    crypto::decrypt_bytes(encrypted, password)
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e))
+}
+
+#[cfg(feature = "python")]
+#[pyfunction]
+fn encrypt_file(path: &str, password: &str) -> PyResult<bool> {
+    use std::fs;
+    let data = fs::read(path)
+        .map_err(|e| pyo3::exceptions::PyIOError::new_err(e.to_string()))?;
+    let encrypted = crypto::encrypt_bytes(&data, password);
+    let enc_path = format!("{}.enc", path);
+    fs::write(&enc_path, encrypted)
+        .map_err(|e| pyo3::exceptions::PyIOError::new_err(e.to_string()))?;
+    Ok(true)
+}
+
+#[cfg(feature = "python")]
+#[pyfunction]
+fn decrypt_file(enc_path: &str, password: &str, output_path: &str) -> PyResult<bool> {
+    use std::fs;
+    let content = fs::read_to_string(enc_path)
+        .map_err(|e| pyo3::exceptions::PyIOError::new_err(e.to_string()))?;
+    let data = crypto::decrypt_bytes(&content, password)
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e))?;
+    fs::write(output_path, data)
+        .map_err(|e| pyo3::exceptions::PyIOError::new_err(e.to_string()))?;
+    Ok(true)
+}
+
+#[cfg(feature = "python")]
+#[pyfunction]
+fn is_encrypted_file(path: &str) -> PyResult<bool> {
+    use std::fs;
+    let content = fs::read_to_string(path)
+        .map_err(|e| pyo3::exceptions::PyIOError::new_err(e.to_string()))?;
+    Ok(crypto::is_encrypted(&content))
+}
+
 // ============================================================
 // PYTHON MODULE
 // ============================================================
@@ -1148,6 +1217,14 @@ fn wallet_core(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(create_wallet, m)?)?;
     m.add_function(wrap_pyfunction!(create_trustline, m)?)?;
     m.add_function(wrap_pyfunction!(get_core_version, m)?)?;
+    m.add_function(wrap_pyfunction!(encrypt_wallet, m)?)?;
+    m.add_function(wrap_pyfunction!(decrypt_wallet, m)?)?;
+    m.add_function(wrap_pyfunction!(is_encrypted_wallet, m)?)?;
+    m.add_function(wrap_pyfunction!(encrypt_db_bytes, m)?)?;
+    m.add_function(wrap_pyfunction!(decrypt_db_bytes, m)?)?;
+    m.add_function(wrap_pyfunction!(encrypt_file, m)?)?;
+    m.add_function(wrap_pyfunction!(decrypt_file, m)?)?;
+    m.add_function(wrap_pyfunction!(is_encrypted_file, m)?)?;
     m.add("__version__", "0.1.0")?;
     Ok(())
 }
