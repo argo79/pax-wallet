@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """
 wallet_manager.py - PAX Wallet Manager for XRP and XLM (Stellar)
-Version loaded from version.py - FIX FOR TERMUX/ANDROID
 """
 
 import json
@@ -35,7 +34,7 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.backends import default_backend
 import ecdsa
 
-# Stellar imports with error handling
+# Stellar imports
 try:
     from stellar_sdk import Keypair, Server, TransactionBuilder, Network, Asset, Memo
     from stellar_sdk.exceptions import NotFoundError, BadRequestError
@@ -48,7 +47,7 @@ except ImportError as e:
     STELLAR_IMPORT_ERROR = str(e)
     logging.warning(f"stellar-sdk not available: {e}")
 
-# 🔥 CORE RUST IMPORTS
+# 🔥 CORE RUST
 try:
     import wallet_core as _rust
     CORE_AVAILABLE = True
@@ -60,14 +59,12 @@ except ImportError as e:
 
 # 🔥 DETERMINE EXECUTION DIRECTORY
 def get_app_dir() -> Path:
-    """Get the execution directory of the program"""
     if getattr(sys, 'frozen', False):
         return Path(os.path.dirname(sys.executable))
     else:
         return Path(os.path.dirname(os.path.abspath(__file__)))
 
 def is_termux() -> bool:
-    """Check if running on Termux/Android"""
     if os.path.exists("/data/data/com.termux"):
         return True
     if os.path.exists("/system/bin") and os.path.exists("/system/app"):
@@ -75,7 +72,6 @@ def is_termux() -> bool:
     return False
 
 APP_DIR = get_app_dir()
-
 if is_termux():
     DATA_DIR = APP_DIR
     print(f"📱 Termux detected - Using directory: {DATA_DIR}")
@@ -127,7 +123,6 @@ class WalletInfo:
 
 @dataclass
 class CoreTrustlineInfo:
-    """Rappresentazione Python di una trustline dal Core Rust"""
     id: str
     identity_id: str
     network: str
@@ -161,7 +156,6 @@ class CoreTrustlineInfo:
     
     @classmethod
     def from_rust(cls, rust_trustline) -> 'CoreTrustlineInfo':
-        """Converte da PyTrustline a dataclass Python"""
         try:
             asset = rust_trustline.asset()
             return cls(
@@ -195,7 +189,7 @@ class CoreTrustlineInfo:
 
 
 class XamanSecretNumbersBridge:
-    """Bridge to convert Xaman secret numbers to XRP seed"""
+    """Bridge per convertire i numeri segreti Xaman in seed XRP"""
     
     def __init__(self):
         self._use_python_fallback = False
@@ -203,11 +197,11 @@ class XamanSecretNumbersBridge:
         if self._nodejs_available:
             self._ensure_library()
         else:
-            logger.warning("Node.js not available, using Python fallback")
+            logger.warning("Node.js non disponibile, uso fallback Python")
             self._use_python_fallback = True
     
     def _get_node_modules_path(self) -> Optional[str]:
-        """Find node_modules path"""
+        """Trova il percorso di node_modules"""
         possible_paths = [
             str(APP_DIR / "node_modules"),
             str(APP_DIR / "node_bundle" / "node_modules"),
@@ -238,24 +232,44 @@ class XamanSecretNumbersBridge:
             return False
     
     def _ensure_library(self) -> None:
-        """Ensure library is available"""
+        """Assicura che la libreria sia disponibile"""
         node_modules_path = self._get_node_modules_path()
         
         if node_modules_path is None:
-            logger.warning("node_modules not found")
+            logger.warning("node_modules non trovata")
             self._use_python_fallback = True
             return
         
-        pkg_new = os.path.join(node_modules_path, "@xrplf", "secret-numbers")
+        # 🔥 PRIMA CERCA xrpl-secret-numbers (0.3.5, compatibile con i numeri)
         pkg_old = os.path.join(node_modules_path, "xrpl-secret-numbers")
+        pkg_new = os.path.join(node_modules_path, "@xrplf", "secret-numbers")
         
-        if os.path.exists(pkg_new):
-            logger.info(f"✅ @xrplf/secret-numbers found")
-        elif os.path.exists(pkg_old):
-            logger.info(f"✅ xrpl-secret-numbers found")
+        if os.path.exists(pkg_old):
+            logger.info(f"✅ xrpl-secret-numbers trovato (versione 0.3.5)")
+            # Usa questo package
+            self._package_name = "xrpl-secret-numbers"
+            self._use_old = True
+            return
+        elif os.path.exists(pkg_new):
+            logger.info(f"✅ @xrplf/secret-numbers trovato (versione {self._get_package_version(pkg_new)})")
+            self._package_name = "@xrplf/secret-numbers"
+            self._use_old = False
+            return
         else:
-            logger.warning("No package found, using Python fallback")
+            logger.warning("Nessun package trovato, uso fallback Python")
             self._use_python_fallback = True
+    
+    def _get_package_version(self, pkg_path: str) -> str:
+        """Legge la versione dal package.json"""
+        try:
+            package_json = os.path.join(pkg_path, "package.json")
+            if os.path.exists(package_json):
+                with open(package_json) as f:
+                    data = json.load(f)
+                    return data.get("version", "sconosciuta")
+        except:
+            pass
+        return "sconosciuta"
     
     def numbers_to_seed(self, numbers: List[str]) -> str:
         if self._use_python_fallback:
@@ -270,13 +284,19 @@ class XamanSecretNumbersBridge:
         return self._numbers_to_address_nodejs(numbers)
     
     def _numbers_to_seed_nodejs(self, numbers: List[str]) -> str:
-        """Conversion via Node.js with input validation"""
-        if not numbers or len(numbers) != 8:
-            raise ValueError(f"Need 8 numbers, got {len(numbers)}")
+        """Conversione via Node.js con xrpl-secret-numbers (0.3.5)"""
+        node_modules_path = self._get_node_modules_path()
+        
+        if node_modules_path is None:
+            node_modules_path = "./node_modules"
+        
+        # 🔥 SANITIZZA I NUMERI
+        if len(numbers) != 8:
+            raise ValueError(f"Servono 8 numeri, hai {len(numbers)}")
         
         for num in numbers:
             if not re.match(r'^[0-9]{6}$', str(num).strip()):
-                raise ValueError(f"Invalid number: {num} (must be 6 digits)")
+                raise ValueError(f"Numero non valido: {num}")
         
         safe_numbers = []
         for num in numbers:
@@ -284,52 +304,36 @@ class XamanSecretNumbersBridge:
             if len(clean_num) == 6:
                 safe_numbers.append(clean_num)
             else:
-                raise ValueError(f"Invalid number after sanitization: {num}")
+                raise ValueError(f"Numero non valido dopo pulizia: {num}")
         
         numbers_str = " ".join(safe_numbers)
         
-        node_modules_path = self._get_node_modules_path()
-        if node_modules_path is None:
-            node_modules_path = "./node_modules"
-        
-        if not re.match(r'^[a-zA-Z0-9_./-]+$', node_modules_path):
-            raise ValueError("Invalid node_modules path")
-        
+        # 🔥 GENERA LO SCRIPT NODE.JS CHE USA IL PACKAGE CORRETTO
         script = f'''
         const path = require('path');
         const modulePath = path.resolve('{node_modules_path}');
-        
         let Account;
-        let useOld = false;
-        
+        // Prova prima xrpl-secret-numbers (0.3.5), poi @xrplf/secret-numbers
         try {{
-            const pkg = require(path.join(modulePath, '@xrplf', 'secret-numbers'));
+            const pkg = require(path.join(modulePath, 'xrpl-secret-numbers'));
             Account = pkg.Account;
         }} catch (e) {{
             try {{
-                const pkg = require(path.join(modulePath, 'xrpl-secret-numbers'));
+                const pkg = require(path.join(modulePath, '@xrplf', 'secret-numbers'));
                 Account = pkg.Account;
-                useOld = true;
             }} catch (e2) {{
-                console.error('No package found');
+                console.error('Nessun package trovato');
                 process.exit(1);
             }}
         }}
-        
         const secret = '{numbers_str}';
         let account;
-        
-        if (useOld) {{
+        try {{
             account = new Account(secret);
-        }} else {{
-            try {{
-                account = new Account(secret);
-            }} catch (e) {{
-                const numbersArray = secret.split(' ');
-                account = new Account(numbersArray);
-            }}
+        }} catch (e) {{
+            const numbersArray = secret.split(' ');
+            account = new Account(numbersArray);
         }}
-        
         console.log(JSON.stringify({{
             familySeed: account.getFamilySeed(),
             address: account.getAddress()
@@ -337,81 +341,60 @@ class XamanSecretNumbersBridge:
         '''
         
         try:
-            result = subprocess.run(
-                ['node', '-e', script],
-                capture_output=True,
-                text=True,
-                timeout=10,
-                shell=False
-            )
+            result = subprocess.run(['node', '-e', script], 
+                                  capture_output=True, 
+                                  text=True, 
+                                  timeout=10)
             if result.returncode != 0:
-                raise RuntimeError(f"Node.js error: {result.stderr}")
+                raise RuntimeError(f"Errore Node.js: {result.stderr}")
             data = json.loads(result.stdout)
             return data['familySeed']
-        except subprocess.TimeoutExpired:
-            raise RuntimeError("Timeout converting numbers")
         except Exception as e:
-            raise RuntimeError(f"Error converting numbers: {e}")
+            raise RuntimeError(f"Errore conversione numeri: {e}")
     
     def _numbers_to_address_nodejs(self, numbers: List[str]) -> str:
-        """Conversion via Node.js for address with validation"""
-        if not numbers or len(numbers) != 8:
-            raise ValueError(f"Need 8 numbers, got {len(numbers)}")
+        """Conversione via Node.js per indirizzo"""
+        node_modules_path = self._get_node_modules_path()
         
-        for num in numbers:
-            if not re.match(r'^[0-9]{6}$', str(num).strip()):
-                raise ValueError(f"Invalid number: {num}")
+        if node_modules_path is None:
+            node_modules_path = "./node_modules"
         
+        # Sanitizza come sopra
+        if len(numbers) != 8:
+            raise ValueError(f"Servono 8 numeri, hai {len(numbers)}")
         safe_numbers = []
         for num in numbers:
             clean_num = re.sub(r'[^0-9]', '', str(num))
             if len(clean_num) == 6:
                 safe_numbers.append(clean_num)
-        
+            else:
+                raise ValueError(f"Numero non valido dopo pulizia: {num}")
         numbers_str = " ".join(safe_numbers)
-        
-        node_modules_path = self._get_node_modules_path()
-        if node_modules_path is None:
-            node_modules_path = "./node_modules"
-        
-        if not re.match(r'^[a-zA-Z0-9_./-]+$', node_modules_path):
-            raise ValueError("Invalid node_modules path")
         
         script = f'''
         const path = require('path');
         const modulePath = path.resolve('{node_modules_path}');
-        
         let Account;
-        let useOld = false;
-        
         try {{
-            const pkg = require(path.join(modulePath, '@xrplf', 'secret-numbers'));
+            const pkg = require(path.join(modulePath, 'xrpl-secret-numbers'));
             Account = pkg.Account;
         }} catch (e) {{
             try {{
-                const pkg = require(path.join(modulePath, 'xrpl-secret-numbers'));
+                const pkg = require(path.join(modulePath, '@xrplf', 'secret-numbers'));
                 Account = pkg.Account;
-                useOld = true;
             }} catch (e2) {{
-                console.error('No package found');
+                console.error('Nessun package trovato');
                 process.exit(1);
             }}
         }}
-        
         const secret = '{numbers_str}';
         let account;
-        
-        if (useOld) {{
+        try {{
             account = new Account(secret);
-        }} else {{
-            try {{
-                account = new Account(secret);
-            }} catch (e) {{
-                const numbersArray = secret.split(' ');
-                account = new Account(numbersArray);
-            }}
+        }} catch (e) {{
+            const numbersArray = secret.split(' ');
+            account = new Account(numbersArray);
         }}
-        
         console.log(JSON.stringify({{
             familySeed: account.getFamilySeed(),
             address: account.getAddress()
@@ -419,32 +402,27 @@ class XamanSecretNumbersBridge:
         '''
         
         try:
-            result = subprocess.run(
-                ['node', '-e', script],
-                capture_output=True,
-                text=True,
-                timeout=10,
-                shell=False
-            )
+            result = subprocess.run(['node', '-e', script], 
+                                  capture_output=True, 
+                                  text=True, 
+                                  timeout=10)
             if result.returncode != 0:
-                raise RuntimeError(f"Node.js error: {result.stderr}")
+                raise RuntimeError(f"Errore Node.js: {result.stderr}")
             data = json.loads(result.stdout)
             return data['address']
-        except subprocess.TimeoutExpired:
-            raise RuntimeError("Timeout converting address")
         except Exception as e:
-            raise RuntimeError(f"Error converting numbers: {e}")
+            raise RuntimeError(f"Errore conversione numeri: {e}")
     
     def _numbers_to_seed_python(self, numbers: List[str]) -> str:
-        """Python fallback - uses 3 bytes per number"""
+        """Fallback Python - usa 3 bytes per numero (funziona sempre)"""
         if len(numbers) != 8:
-            raise ValueError(f"Need 8 numbers, got {len(numbers)}")
+            raise ValueError(f"Servono 8 numeri, hai {len(numbers)}")
         
         for num in numbers:
             if not num.isdigit() or len(num) != 6:
-                raise ValueError(f"Invalid number: {num}")
+                raise ValueError(f"Numero non valido: {num}")
             if not (0 <= int(num) <= 999999):
-                raise ValueError(f"Number out of range: {num}")
+                raise ValueError(f"Numero fuori range: {num}")
         
         entropy = bytearray()
         for num_str in numbers:
@@ -461,7 +439,6 @@ class StellarManager:
     def __init__(self, network: str = "testnet"):
         if not STELLAR_AVAILABLE:
             raise ImportError(f"stellar-sdk not installed: {STELLAR_IMPORT_ERROR}")
-        
         self.network = network
         self._init_server(network)
     
@@ -513,7 +490,6 @@ class StellarManager:
         if self.network != "testnet":
             logger.error("Friendbot works only on TESTNET!")
             return False
-        
         try:
             import requests
             url = f"https://friendbot.stellar.org?addr={address}"
@@ -533,29 +509,24 @@ class StellarManager:
         try:
             keypair = Keypair.from_secret(from_secret)
             source_account = self.server.load_account(keypair.public_key)
-            
             builder = TransactionBuilder(
                 source_account=source_account,
                 network_passphrase=self.network_passphrase,
                 base_fee=100
             )
             builder.set_timeout(300)
-            
             builder.append_payment_op(
                 destination=to_address,
                 amount=str(amount),
                 asset=Asset.native()
             )
-            
             if memo_id is not None:
                 builder.add_memo(IdMemo(memo_id))
             elif memo_text:
                 builder.add_memo(TextMemo(memo_text[:28]))
-            
             transaction = builder.build()
             transaction.sign(keypair)
             response = self.server.submit_transaction(transaction)
-            
             return {
                 "success": True,
                 "hash": response.get("hash", "unknown"),
@@ -589,7 +560,6 @@ class HybridXRPManager:
     """Main manager for XRP and XLM wallets - WITH RUST CORE INTEGRATION"""
     
     def __init__(self, data_file: str = "wallet_data.json", password: str = None):
-        # 🔥 USE ONLY EXECUTION DIRECTORY
         self.data_file = DATA_DIR / data_file
         self.mnemo = Mnemonic("english")
         
@@ -622,16 +592,129 @@ class HybridXRPManager:
         self._core_identity_id: Optional[str] = None
         self._core_initialized: bool = False
         self._core_integration: Optional[Any] = None
+        self._temp_db_path: Optional[str] = None
         
         # 🔥 CREATE DIRECTORY IF NOT EXISTS
         self.data_file.parent.mkdir(parents=True, exist_ok=True)
         
-        # Load saved wallet
-        self.load()
+        # 🔥 NON CARICARE NEL COSTRUTTORE!
+        # Il caricamento avviene solo quando chiamato da initialize()
+        # con la password corretta!
         
-        # 🔥 INIT CORE RUST
+        logger.info(f"✅ HybridXRPManager initialized (not loaded)")
+    
+    @property
+    def core(self):
+        """Restituisce l'istanza del core Rust"""
+        return self._core
+    
+
+
+    # ============================================================
+    # 🔥 NUOVE FUNZIONI ED25519 (DA AGGIUNGERE)
+    # ============================================================
+    
+
+    # ============================================================
+    # 🔥 INITIALIZE - CARICA IL WALLET CON LA PASSWORD
+    # ============================================================
+    
+    def initialize(self, password: str) -> bool:
+        """Inizializza il manager con la password: carica e avvia il core"""
+        self._wallet_password = password
+        
+        # 🔥 PRIMA CARICA (che decifra i DB)
+        if not self.load():
+            # Se non c'è file, va bene lo stesso
+            print("ℹ️ No existing wallet data, creating new")
+        
+        # 🔥 POI INIZIALIZZA IL CORE
         if CORE_AVAILABLE:
             self._init_core()
+        
+        return True
+    
+    # ============================================================
+    # 🔥 DECRYPT DB TO BYTES
+    # ============================================================
+    
+    def _decrypt_db_to_bytes(self, db_path: str) -> Optional[bytes]:
+        """Decifra un DB con decrypt_db_bytes() - RESTITUISCE BYTES"""
+        try:
+            from core_wrapper import decrypt_db_bytes, is_encrypted_file
+        except ImportError:
+            return None
+        
+        if not self._wallet_password or not os.path.exists(db_path):
+            return None
+        
+        try:
+            # 🔥 SE NON È CIFRATO, LEGGI DIRETTAMENTE
+            if not is_encrypted_file(db_path):
+                with open(db_path, 'rb') as f:
+                    return f.read()
+            
+            # 🔥 LEGGI IL FILE CIFRATO COME STRINGA
+            with open(db_path, 'r') as f:
+                encrypted_str = f.read()
+            
+            # 🔥 DECIFRA I BYTES
+            decrypted_bytes = decrypt_db_bytes(encrypted_str, self._wallet_password)
+            return decrypted_bytes
+        except Exception as e:
+            logger.error(f"Error decrypting {db_path}: {e}")
+            return None
+    
+    # ============================================================
+    # 🔥 INIT CORE - USA UN SOLO DB (wallet_cli.db)
+    # ============================================================
+    
+    def _init_core(self) -> None:
+        """Initialize Rust core - USA UN SOLO DB (wallet_cli.db)"""
+        if not CORE_AVAILABLE:
+            return
+        
+        if self._core_initialized:
+            return
+        
+        try:
+            from core_wrapper import create_core, CoreIntegration
+            import tempfile
+            
+            # 🔥 USA SOLO wallet_cli.db!
+            db_path = DATA_DIR / "wallet_cli.db"
+            temp_path = None
+            
+            if os.path.exists(db_path):
+                decrypted_bytes = self._decrypt_db_to_bytes(str(db_path))
+                if decrypted_bytes:
+                    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.db')
+                    temp_file.write(decrypted_bytes)
+                    temp_file.close()
+                    temp_path = temp_file.name
+                    print(f"🔐 DB decrypted to temp: {temp_path}")
+                else:
+                    temp_path = str(db_path)
+            else:
+                temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.db')
+                temp_file.close()
+                temp_path = temp_file.name
+            
+            # 🔥 SALVA IL PERCORSO TEMPORANEO
+            self._temp_db_path = temp_path
+            
+            # 🔥 CREA IL CORE CON IL DB DECIFRATO
+            self._core = create_core(temp_path)
+            self._core_integration = CoreIntegration(self._core)
+            self._core_initialized = True
+            
+            if self.is_loaded():
+                self._sync_core_identity()
+            
+            logger.info(f"✅ Core Rust initialized with wallet_cli.db")
+        except Exception as e:
+            logger.error(f"Error initializing core: {e}")
+            self._core_initialized = False
     
     @property
     def bridge(self) -> XamanSecretNumbersBridge:
@@ -640,96 +723,9 @@ class HybridXRPManager:
         return self._bridge
     
     # ============================================================
-    # CORE RUST INTEGRATION
+    # 🔥 SYNC CORE IDENTITY
     # ============================================================
     
-    def _init_core(self) -> None:
-        """Initialize Rust core"""
-        if not CORE_AVAILABLE:
-            logger.warning("Core Rust not available")
-            return
-        
-        if self._core_initialized:
-            return
-        
-        try:
-            # Import core wrapper
-            from core_wrapper import create_core, CoreIntegration
-            
-            core_db_path = DATA_DIR / "wallet_core.db"
-            self._core = create_core(str(core_db_path))
-            self._core_integration = CoreIntegration(self._core)
-            self._core_initialized = True
-            
-            # Create identity if wallet loaded
-            if self.is_loaded():
-                self._sync_core_identity()
-            
-            logger.info(f"✅ Core Rust initialized at {core_db_path}")
-        except ImportError as e:
-            logger.warning(f"Core wrapper not available: {e}")
-            self._core_initialized = False
-        except Exception as e:
-            logger.error(f"Error initializing core: {e}")
-            self._core_initialized = False
-    
-    def _decrypt_db_if_needed(self, db_path: str) -> bool:
-        """Decifra un DB se esiste il file .enc"""
-        try:
-            from core_wrapper import is_encrypted_file, decrypt_file
-        except ImportError:
-            return False
-        
-        enc_path = f"{db_path}.enc"
-        if not os.path.exists(enc_path):
-            return False
-        
-        if not is_encrypted_file(enc_path):
-            return False
-        
-        if not self._wallet_password:
-            print(f"❌ DB encrypted but no password: {db_path}")
-            return False
-        
-        temp_path = f"{db_path}.tmp"
-        try:
-            decrypt_file(enc_path, self._wallet_password, temp_path)
-            if os.path.exists(db_path):
-                os.remove(db_path)
-            os.rename(temp_path, db_path)
-            return True
-        except Exception as e:
-            print(f"❌ Error decrypting {db_path}: {e}")
-            if os.path.exists(temp_path):
-                os.remove(temp_path)
-            return False
-
-    def _encrypt_db(self, db_path: str) -> bool:
-        """Cifra un DB esistente"""
-        try:
-            from core_wrapper import encrypt_file
-        except ImportError:
-            return False
-        
-        if not self._wallet_password:
-            return False
-        
-        if not os.path.exists(db_path):
-            return False
-        
-        enc_path = f"{db_path}.enc"
-        if os.path.exists(enc_path):
-            return True
-        
-        try:
-            encrypt_file(db_path, self._wallet_password)
-            if os.path.exists(db_path):
-                os.remove(db_path)
-            return True
-        except Exception as e:
-            print(f"❌ Error encrypting {db_path}: {e}")
-            return False
-
     def _sync_core_identity(self) -> Optional[str]:
         """Sync or create identity in core"""
         if not self._core_initialized or not CORE_AVAILABLE:
@@ -789,15 +785,11 @@ class HybridXRPManager:
                 return []
         
         try:
-            # Get trustlines from ledger
             trustlines = self.get_trustlines(force_refresh=True)
-            
-            # Delete existing trustlines
             existing = self._core.get_trustlines(identity_id)
             for tl in existing:
                 self._core.delete_trustline(tl.id)
             
-            # Create new trustlines
             results = []
             for tl_data in trustlines:
                 network = tl_data.get("network", "XRPL")
@@ -823,11 +815,9 @@ class HybridXRPManager:
                         limit
                     )
                     
-                    # Update balance if available
                     if balance is not None:
                         self._core.update_trustline_balance(rust_id, float(balance))
                     
-                    # Get trustline info
                     tl_info = self._core.get_trustline(rust_id)
                     if tl_info:
                         results.append(CoreTrustlineInfo.from_rust(tl_info))
@@ -859,13 +849,11 @@ class HybridXRPManager:
     
     def create_trustline_with_core(self, asset_code: str, issuer: str, limit: float = None) -> Dict:
         """Create trustline and sync with core"""
-        # Create on ledger
         result = self.set_trustline(asset_code, issuer, limit)
         
         if not result.get("success"):
             return result
         
-        # Sync with core
         if self._core_initialized and CORE_AVAILABLE:
             identity_id = self.get_core_identity()
             if identity_id:
@@ -921,12 +909,10 @@ class HybridXRPManager:
         sk = ecdsa.SigningKey.from_string(private_key_bytes, curve=ecdsa.SECP256k1)
         vk = sk.get_verifying_key()
         vk_bytes = vk.to_string()
-        
         if vk_bytes[31] % 2 == 0:
             public_key_bytes = b'\x02' + vk_bytes[:32]
         else:
             public_key_bytes = b'\x03' + vk_bytes[:32]
-        
         public_key_hex = public_key_bytes.hex()
         address = keypairs.derive_classic_address(public_key_hex)
         return public_key_hex, address
@@ -935,13 +921,10 @@ class HybridXRPManager:
         return " ".join(numbers)
     
     def _clean_numbers_input(self, raw_input: str) -> List[str]:
-        """Clean and validate Xaman numbers input"""
         if not raw_input:
             return []
-        
         cleaned = re.sub(r'[^0-9\s]', '', raw_input)
         parts = [p for p in cleaned.split() if p]
-        
         valid_numbers = []
         for p in parts:
             if len(p) == 6 and p.isdigit():
@@ -951,7 +934,6 @@ class HybridXRPManager:
                     chunk = p[i:i+6]
                     if len(chunk) == 6 and chunk.isdigit():
                         valid_numbers.append(chunk)
-        
         return valid_numbers[:8] if len(valid_numbers) >= 8 else []
     
     def _bip39_to_private_key(self, phrase: str, passphrase: str = "") -> str:
@@ -963,9 +945,7 @@ class HybridXRPManager:
     def _derive_private_key(self, keyword: str = "default", index: int = 0) -> bytes:
         if self.base_private is None:
             raise ValueError("❌ No wallet loaded!")
-        
         salt = hashlib.sha256(f"hybrid_xrp_derivation_{self.crypto_type}".encode()).digest()
-        
         hkdf = HKDF(
             algorithm=hashes.SHA512(),
             length=32,
@@ -987,12 +967,10 @@ class HybridXRPManager:
         try:
             from xrpl.account import get_balance
             from xrpl.clients import JsonRpcClient
-            
             if self.network == "mainnet":
                 client = JsonRpcClient("https://s1.ripple.com:51234/")
             else:
                 client = JsonRpcClient("https://s.altnet.rippletest.net:51234/")
-            
             balance = get_balance(address, client)
             return balance / 1_000_000
         except Exception as e:
@@ -1023,35 +1001,37 @@ class HybridXRPManager:
     def set_crypto(self, crypto_type: str) -> None:
         if crypto_type not in [c.value for c in CryptoType]:
             raise ValueError(f"Crypto not supported: {crypto_type}")
-        
         self.crypto_type = crypto_type
         if crypto_type == "XLM" and STELLAR_AVAILABLE:
             self._init_stellar()
     
     # ============================================================
-    # PUBLIC METHODS - WALLET CREATION
+    # PUBLIC METHODS - WALLET CREATION (XRP)
     # ============================================================
-    
+
     def create_new_wallet_bip39(self, passphrase: str = "", strength: int = 128) -> Dict[str, Any]:
+        """Crea un nuovo wallet usando SECP256K1"""
         if self.crypto_type == "XLM":
             return self.create_new_wallet_stellar(passphrase, strength)
         
-        self.seed_type = SeedType.BIP39.value
         self.seed_phrase = self.mnemo.generate(strength=strength)
+        self.seed_type = SeedType.BIP39.value
         self.seed_numbers = None
         self.passphrase = passphrase
+        self.crypto_type = "XRP"
         
         private_key_hex = self._bip39_to_private_key(self.seed_phrase, passphrase)
+        if not self._validate_secp256k1(private_key_hex):
+            raise ValueError("Private key SECP256k1 non valida")
+        
         public_key, address = self._private_key_to_keypair(private_key_hex)
         self.base_private = bytes.fromhex(private_key_hex)
         self._correct_address = address
-        
         entropy = private_key_hex[:32]
         self.base_seed_xrp = keypairs.generate_seed(entropy=entropy)
         
         self.save()
         
-        # Sync with core
         if CORE_AVAILABLE:
             self._sync_core_identity()
         
@@ -1065,33 +1045,34 @@ class HybridXRPManager:
             "first_public_key": public_key,
             "first_seed_xrp": self.base_seed_xrp,
         }
+
+    # ============================================================
+    # PRIVATE HELPERS
+    # ============================================================
+
+    def _validate_secp256k1(self, key_hex: str) -> bool:
+        """Controlla se la private key è valida per SECP256k1 (key < order)"""
+        order = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141
+        return int(key_hex, 16) < order
     
     def create_new_wallet_stellar(self, passphrase: str = "", strength: int = 256) -> Dict[str, Any]:
         if not STELLAR_AVAILABLE:
             raise ImportError(f"stellar-sdk not installed: {STELLAR_IMPORT_ERROR}")
-        
         mnemonic = StellarMnemonic("english")
         seed_phrase = mnemonic.generate(strength=strength)
-        
         self.seed_phrase = seed_phrase
         self.seed_type = SeedType.BIP39.value
         self.seed_numbers = None
         self.passphrase = passphrase
         self.crypto_type = "XLM"
-        
         keypair = Keypair.from_mnemonic_phrase(seed_phrase)
-        
         self.base_seed_stellar = keypair.secret
         self._correct_address = keypair.public_key
         self.base_private = None
         self.base_seed_xrp = None
-        
         self.save()
-        
-        # Sync with core
         if CORE_AVAILABLE:
             self._sync_core_identity()
-        
         return {
             "seed_type": SeedType.BIP39.value,
             "seed_phrase": seed_phrase,
@@ -1107,12 +1088,10 @@ class HybridXRPManager:
         seed = keypairs.generate_seed(algorithm=CryptoAlgorithm.ED25519)
         public_key, private_key = keypairs.derive_keypair(seed)
         address = keypairs.derive_classic_address(public_key)
-        
         decoded = base58.b58decode(seed)
         seed_bytes = decoded[1:]
         secret_numbers = [f"{int.from_bytes(seed_bytes[i:i+2], 'big'):06d}" 
                          for i in range(0, 16, 2)]
-        
         self.seed_type = SeedType.NUMBERS.value
         self.seed_numbers = secret_numbers
         self.seed_phrase = None
@@ -1120,13 +1099,9 @@ class HybridXRPManager:
         self.base_private = bytes.fromhex(private_key)
         self.base_seed_xrp = seed
         self._correct_address = address
-        
         self.save()
-        
-        # Sync with core
         if CORE_AVAILABLE:
             self._sync_core_identity()
-        
         return {
             "seed_type": SeedType.NUMBERS.value,
             "secret_numbers": secret_numbers,
@@ -1142,11 +1117,8 @@ class HybridXRPManager:
     def detect_input_type(self, seed_input: Union[str, List[str]]) -> str:
         if isinstance(seed_input, list):
             return SeedType.NUMBERS.value
-        
         if isinstance(seed_input, str):
             seed_input = seed_input.strip()
-            
-            # 1. CONTROLLA SE È UNA MNEMONICA BIP39 (24 parole) PRIMA DI TUTTO!
             words = seed_input.split()
             if len(words) >= 12 and len(words) <= 24:
                 try:
@@ -1154,32 +1126,22 @@ class HybridXRPManager:
                         return SeedType.BIP39.value
                 except:
                     pass
-            
-            # 2. STELLAR SEED (inizia con S, 56 caratteri)
             if seed_input.startswith("S") and len(seed_input) >= 56:
                 return SeedType.STELLAR_SEED.value
-            
-            # 3. PRIVATE KEY (64 caratteri esadecimali)
             if len(seed_input) == 64 and all(c in "0123456789abcdefABCDEF" for c in seed_input):
                 return SeedType.PRIVATE_KEY.value
-            
-            # 4. XRP SEED (inizia con s, MA NON è una mnemonica)
             if seed_input.startswith("s") and len(seed_input) < 40:
                 return SeedType.XRP_SEED.value
-            
-            # 5. NUMERI XAMAN
             numbers = self._clean_numbers_input(seed_input)
             if len(numbers) == 8 and all(p.isdigit() and len(p) == 6 for p in numbers):
                 return SeedType.NUMBERS.value
-            
             return SeedType.BIP39.value
-        
         return SeedType.BIP39.value
     
     def import_wallet(self, seed_input: Union[str, List[str]], 
                      passphrase: str = "", 
                      input_type: str = "auto") -> Dict[str, Any]:
-        
+        """Importa un wallet usando SECP256K1"""
         if isinstance(seed_input, str):
             seed_input = seed_input.strip()
             if not seed_input:
@@ -1188,81 +1150,102 @@ class HybridXRPManager:
         if input_type == "auto":
             input_type = self.detect_input_type(seed_input)
         
+        # 🔥 CASO MNEMONIC → SECP256K1 (originale)
         if input_type == SeedType.BIP39.value:
             if self.crypto_type == "XLM":
-                result = self._import_bip39_as_stellar(seed_input, passphrase)
-            else:
-                result = self._import_bip39(seed_input, passphrase)
-        elif input_type == SeedType.NUMBERS.value:
-            result = self._import_numbers(seed_input)
-        elif input_type == SeedType.PRIVATE_KEY.value:
-            result = self._import_private_key(seed_input)
+                return self._import_bip39_as_stellar(seed_input, passphrase)
+            return self._import_bip39(seed_input, passphrase)  # <-- USA _import_bip39
+        
+        # 🔥 CASO SEED XRP (s... o sEd...)
         elif input_type == SeedType.XRP_SEED.value:
-            result = self._import_xrp_seed(seed_input)
+            return self._import_xrp_seed(seed_input)
+        
+        # 🔥 CASO PRIVATE KEY
+        elif input_type == SeedType.PRIVATE_KEY.value:
+            return self._import_private_key(seed_input)
+        
+        # 🔥 CASO XAMAN NUMBERS
+        elif input_type == SeedType.NUMBERS.value:
+            return self._import_numbers(seed_input)
+        
+        # 🔥 CASO STELLAR SEED
         elif input_type == SeedType.STELLAR_SEED.value:
-            result = self._import_stellar_seed(seed_input)
+            return self._import_stellar_seed(seed_input)
+        
         else:
             raise ValueError(f"Unsupported type: {input_type}")
-        
-        # Sync with core after import
-        if CORE_AVAILABLE:
-            self._sync_core_identity()
-        
-        return result
     
     def _import_bip39(self, seed_phrase: str, passphrase: str = "") -> Dict[str, Any]:
         if not self.mnemo.check(seed_phrase):
             raise ValueError("❌ Invalid seed phrase!")
         
-        self.seed_type = SeedType.BIP39.value
-        self.seed_phrase = seed_phrase
-        self.seed_numbers = None
-        self.passphrase = passphrase
-        
-        private_key_hex = self._bip39_to_private_key(seed_phrase, passphrase)
-        public_key, address = self._private_key_to_keypair(private_key_hex)
-        self.base_private = bytes.fromhex(private_key_hex)
-        self._correct_address = address
-        
-        entropy = private_key_hex[:32]
-        self.base_seed_xrp = keypairs.generate_seed(entropy=entropy)
-        
-        self.save()
-        
-        return {
-            "seed_type": SeedType.BIP39.value,
-            "seed_phrase": seed_phrase,
-            "passphrase": passphrase,
-            "word_count": len(seed_phrase.split()),
-            "first_address": address,
-            "first_private_key": private_key_hex,
-            "first_public_key": public_key,
-            "first_seed_xrp": self.base_seed_xrp,
-        }
+        if hasattr(XRPWallet, 'from_mnemonic'):
+            wallet = XRPWallet.from_mnemonic(seed_phrase, passphrase)
+            self.seed_type = SeedType.XRP_SEED.value
+            self.seed_phrase = seed_phrase
+            self.seed_numbers = None
+            self.passphrase = passphrase
+            self.base_private = bytes.fromhex(wallet.private_key)
+            self.base_seed_xrp = wallet.seed
+            self._correct_address = wallet.classic_address
+            self.crypto_type = "XRP"
+            self.save()
+            if CORE_AVAILABLE:
+                self._sync_core_identity()
+            return {
+                "seed_type": "xrp_seed",
+                "seed_phrase": seed_phrase,
+                "passphrase": passphrase,
+                "word_count": len(seed_phrase.split()),
+                "first_address": wallet.classic_address,
+                "first_private_key": wallet.private_key,
+                "first_public_key": wallet.public_key,
+                "first_seed_xrp": wallet.seed,
+            }
+        else:
+            # Fallback SECP256k1
+            print("⚠️ xrpl-py non supporta Wallet.from_mnemonic, importo SECP256k1 (non compatibile con Xaman).")
+            self.seed_type = SeedType.BIP39.value
+            self.seed_phrase = seed_phrase
+            self.seed_numbers = None
+            self.passphrase = passphrase
+            private_key_hex = self._bip39_to_private_key(seed_phrase, passphrase)
+            if not self._validate_secp256k1(private_key_hex):
+                raise ValueError("Private key SECP256k1 non valida (supera l'ordine della curva).")
+            public_key, address = self._private_key_to_keypair(private_key_hex)
+            self.base_private = bytes.fromhex(private_key_hex)
+            self._correct_address = address
+            entropy = private_key_hex[:32]
+            self.base_seed_xrp = keypairs.generate_seed(entropy=entropy)
+            self.save()
+            return {
+                "seed_type": SeedType.BIP39.value,
+                "seed_phrase": seed_phrase,
+                "passphrase": passphrase,
+                "word_count": len(seed_phrase.split()),
+                "first_address": address,
+                "first_private_key": private_key_hex,
+                "first_public_key": public_key,
+                "first_seed_xrp": self.base_seed_xrp,
+            }
     
     def _import_bip39_as_stellar(self, seed_phrase: str, passphrase: str = "") -> Dict[str, Any]:
         if not STELLAR_AVAILABLE:
             raise ImportError(f"stellar-sdk not installed: {STELLAR_IMPORT_ERROR}")
-        
         mnemonic = StellarMnemonic("english")
         if not mnemonic.check(seed_phrase):
             raise ValueError("❌ Invalid seed phrase!")
-        
         self.seed_type = SeedType.BIP39.value
         self.seed_phrase = seed_phrase
         self.seed_numbers = None
         self.passphrase = passphrase
         self.crypto_type = "XLM"
-        
         keypair = Keypair.from_mnemonic_phrase(seed_phrase)
-        
         self.base_seed_stellar = keypair.secret
         self._correct_address = keypair.public_key
         self.base_private = None
         self.base_seed_xrp = None
-        
         self.save()
-        
         return {
             "seed_type": SeedType.BIP39.value,
             "seed_phrase": seed_phrase,
@@ -1275,17 +1258,38 @@ class HybridXRPManager:
         }
     
     def _import_private_key(self, private_key_hex: str) -> Dict[str, Any]:
+        """
+        Importa un wallet da una private key (hex).
+        Supporta:
+        - Chiave raw da 32 byte (64 caratteri hex)
+        - Chiave compressa da 33 byte (66 caratteri hex, prefisso 00/01)
+        """
         try:
-            public_key, address = self._private_key_to_keypair(private_key_hex)
+            private_key_hex = private_key_hex.strip()
+            
+            # 🔥 SE È 66 CARATTERI (33 BYTE), RIMUOVI IL PREFISSO
+            if len(private_key_hex) == 66:
+                private_key_raw = private_key_hex[2:]  # Rimuovi prefisso
+                print(f"🔑 Chiave compressa (33 byte) → rimossa il prefisso '{private_key_hex[:2]}'")
+            else:
+                private_key_raw = private_key_hex
+            
+            # Controlla che sia 64 caratteri (32 byte)
+            if len(private_key_raw) != 64:
+                raise ValueError(f"La private key deve essere di 64 caratteri, ricevuti {len(private_key_raw)}")
+            
+            # Deriva public key e address (SECP256K1)
+            public_key, address = self._private_key_to_keypair(private_key_raw)
             
             self.seed_type = SeedType.PRIVATE_KEY.value
             self.seed_phrase = None
             self.seed_numbers = None
             self.passphrase = ""
-            self.base_private = bytes.fromhex(private_key_hex)
+            self.base_private = bytes.fromhex(private_key_raw)  # <-- 32 byte
             self._correct_address = address
             
-            entropy = private_key_hex[:32]
+            # Genera seed XRP
+            entropy = private_key_raw[:32]
             self.base_seed_xrp = keypairs.generate_seed(entropy=entropy)
             
             self.save()
@@ -1293,22 +1297,21 @@ class HybridXRPManager:
             return {
                 "seed_type": SeedType.PRIVATE_KEY.value,
                 "first_address": address,
-                "first_private_key": private_key_hex,
+                "first_private_key": private_key_raw,  # <-- RAW 32 BYTE
                 "first_public_key": public_key,
                 "first_seed_xrp": self.base_seed_xrp,
             }
         except Exception as e:
-            raise ValueError(f"Invalid private key: {e}")
+            raise ValueError(f"Errore importazione private key: {e}")
     
     def _import_xrp_seed(self, xrp_seed: str) -> Dict[str, Any]:
+        """Importa da seed XRP - supporta sia ED25519 che SECP256K1"""
         try:
-            # Pulisci l'input (rimuovi spazi, newline)
             xrp_seed = xrp_seed.strip()
-            
-            # Se contiene spazi, è una mnemonica, non un seed XRP
             if ' ' in xrp_seed:
-                raise ValueError("XRP seed cannot contain spaces. Did you mean to import a mnemonic?")
+                raise ValueError("XRP seed cannot contain spaces")
             
+            # 🔥 CREA WALLET DAL SEED (xrpl-py deduce l'algoritmo dal prefisso)
             wallet = XRPWallet.from_seed(xrp_seed)
             
             self.seed_type = SeedType.XRP_SEED.value
@@ -1334,11 +1337,9 @@ class HybridXRPManager:
     def _import_stellar_seed(self, stellar_seed: str) -> Dict[str, Any]:
         if not STELLAR_AVAILABLE:
             raise ImportError(f"stellar-sdk not installed: {STELLAR_IMPORT_ERROR}")
-        
         try:
             self._init_stellar()
             wallet = self.stellar_manager.from_seed(stellar_seed)
-            
             self.seed_type = SeedType.STELLAR_SEED.value
             self.seed_phrase = None
             self.seed_numbers = None
@@ -1346,9 +1347,7 @@ class HybridXRPManager:
             self.base_seed_stellar = stellar_seed
             self._correct_address = wallet["public_key"]
             self.crypto_type = "XLM"
-            
             self.save()
-            
             return {
                 "seed_type": SeedType.STELLAR_SEED.value,
                 "first_address": wallet["public_key"],
@@ -1359,7 +1358,10 @@ class HybridXRPManager:
             raise ValueError(f"Invalid Stellar seed: {e}")
     
     def _import_numbers(self, numbers: Union[str, List[str]]) -> Dict[str, Any]:
-        """Import wallet from Xaman numbers with validation"""
+        """
+        Importa wallet da Xaman secret numbers (8 numeri di 6 cifre)
+        Usa il bridge per convertire i numeri in seed XRP
+        """
         if isinstance(numbers, str):
             numbers = self._clean_numbers_input(numbers)
         
@@ -1371,9 +1373,18 @@ class HybridXRPManager:
                 raise ValueError(f"❌ '{num}' invalid (need 6 digits)")
         
         try:
+            # 🔥 USA IL BRIDGE PER CONVERTIRE I NUMERI
             xrp_seed = self.bridge.numbers_to_seed(numbers)
             address = self.bridge.numbers_to_address(numbers)
+            
+            # 🔥 USA IL SEED XRP PER CREARE IL WALLET (SECP256K1)
             wallet = XRPWallet.from_seed(xrp_seed)
+            
+            # 🔥 VERIFICA CHE L'INDIRIZZO CORRISPONDA
+            if wallet.classic_address != address:
+                print_yellow(f"⚠️ Address mismatch: bridge={address}, wallet={wallet.classic_address}")
+                print_yellow("   Usando l'indirizzo dal wallet...")
+                address = wallet.classic_address
             
             self.seed_type = SeedType.NUMBERS.value
             self.seed_numbers = numbers
@@ -1394,18 +1405,17 @@ class HybridXRPManager:
                 "first_public_key": wallet.public_key,
                 "first_seed_xrp": xrp_seed,
             }
+            
         except Exception as e:
             raise ValueError(f"Invalid numbers: {e}")
     
     def validate_seed(self, seed_input: Union[str, List[str]]) -> Dict[str, Any]:
-        """Validate a seed and return information"""
         input_type = self.detect_input_type(seed_input)
         result = {
             "valid": False,
             "type": input_type,
             "details": ""
         }
-        
         try:
             if input_type == SeedType.BIP39.value:
                 if isinstance(seed_input, str):
@@ -1415,7 +1425,6 @@ class HybridXRPManager:
                         result["details"] = f"Valid BIP39 mnemonic with {result['word_count']} words"
                     else:
                         result["details"] = "Invalid BIP39 mnemonic"
-            
             elif input_type == SeedType.NUMBERS.value:
                 numbers = seed_input if isinstance(seed_input, list) else self._clean_numbers_input(seed_input)
                 if len(numbers) == 8 and all(n.isdigit() and len(n) == 6 for n in numbers):
@@ -1423,7 +1432,6 @@ class HybridXRPManager:
                     result["details"] = f"Valid Xaman secret numbers: {len(numbers)} numbers"
                 else:
                     result["details"] = "Invalid numbers format"
-            
             elif input_type == SeedType.XRP_SEED.value:
                 try:
                     XRPWallet.from_seed(seed_input)
@@ -1431,7 +1439,6 @@ class HybridXRPManager:
                     result["details"] = "Valid XRP seed"
                 except:
                     result["details"] = "Invalid XRP seed"
-            
             elif input_type == SeedType.STELLAR_SEED.value:
                 try:
                     if STELLAR_AVAILABLE:
@@ -1442,7 +1449,6 @@ class HybridXRPManager:
                         result["details"] = "stellar-sdk not available"
                 except:
                     result["details"] = "Invalid Stellar seed"
-            
             elif input_type == SeedType.PRIVATE_KEY.value:
                 try:
                     bytes.fromhex(seed_input)
@@ -1450,35 +1456,49 @@ class HybridXRPManager:
                     result["details"] = "Valid private key (hex)"
                 except:
                     result["details"] = "Invalid private key"
-        
         except Exception as e:
             result["details"] = f"Error: {str(e)}"
-        
         return result
     
     # ============================================================
     # PUBLIC METHODS - GET WALLET
     # ============================================================
     
-    def get_wallet(self, keyword: str = "default", index: int = 0) -> Union[XRPWallet, Dict]:
+    def get_wallet(self, keyword: str = "default", index: int = 0) -> XRPWallet:
+        """Restituisce un wallet XRP (SECP256K1 o ED25519 a seconda del seed)"""
         if self.crypto_type == "XLM":
             return self._get_stellar_wallet()
-        return self._get_xrp_wallet(keyword, index)
+        
+        if not self.is_loaded():
+            raise ValueError("❌ No wallet loaded!")
+        
+        # 🔥 SE ABBIAMO IL SEED XRP, USA XRPWallet.from_seed (DEDUCE L'ALGORITMO)
+        if self.base_seed_xrp:
+            return XRPWallet.from_seed(self.base_seed_xrp)
+        
+        # 🔥 SE ABBIAMO LA PRIVATE KEY, USA I METODI ESISTENTI
+        if self.base_private:
+            private_key_hex = self.base_private.hex()
+            public_key, _ = self._private_key_to_keypair(private_key_hex)
+            return XRPWallet(
+                public_key=public_key,
+                private_key=private_key_hex,
+                # NON FORZARE ALGORITMO! Lascia che xrpl-py lo deduca
+            )
+        
+        raise ValueError("❌ Nessuna chiave disponibile")
     
     def _get_xrp_wallet(self, keyword: str = "default", index: int = 0) -> XRPWallet:
         if self.seed_type in [SeedType.NUMBERS.value, SeedType.XRP_SEED.value]:
             if self.base_seed_xrp is not None:
                 return XRPWallet.from_seed(self.base_seed_xrp)
-        
         if self.base_private is None:
             raise ValueError("❌ No wallet loaded!")
-        
         if keyword == "default" and index == 0:
             private_key_hex = self.base_private.hex()
         else:
             private_key_bytes = self._derive_private_key(keyword, index)
             private_key_hex = private_key_bytes.hex()
-        
         public_key, _ = self._private_key_to_keypair(private_key_hex)
         return XRPWallet(
             public_key=public_key,
@@ -1490,16 +1510,13 @@ class HybridXRPManager:
         if self.base_seed_stellar:
             self._init_stellar()
             return self.stellar_manager.from_seed(self.base_seed_stellar)
-        
         if self.seed_phrase and self.crypto_type == "XLM":
             from stellar_sdk import Keypair
-            
             if keyword == "default" and index == 0:
                 keypair = Keypair.from_mnemonic_phrase(self.seed_phrase)
             else:
                 passphrase = f"{keyword}:{index}"
                 keypair = Keypair.from_mnemonic_phrase(self.seed_phrase, passphrase)
-            
             self.base_seed_stellar = keypair.secret
             self._correct_address = keypair.public_key
             self.save()
@@ -1508,13 +1525,11 @@ class HybridXRPManager:
                 "secret_key": keypair.secret,
                 "address": keypair.public_key
             }
-        
         raise ValueError("❌ No Stellar wallet loaded!")
     
     def get_address(self, keyword: str = "default", index: int = 0) -> str:
         if self._correct_address and keyword == "default" and index == 0:
             return self._correct_address
-        
         wallet = self.get_wallet(keyword, index)
         if self.crypto_type == "XLM":
             return wallet.get("public_key", "")
@@ -1522,7 +1537,6 @@ class HybridXRPManager:
     
     def get_wallet_info(self, keyword: str = "default", index: int = 0) -> WalletInfo:
         wallet = self.get_wallet(keyword, index)
-        
         if self.crypto_type == "XLM":
             return WalletInfo(
                 keyword=keyword,
@@ -1533,7 +1547,6 @@ class HybridXRPManager:
                 seed_xrp=self.base_seed_stellar or "",
                 created_at=datetime.now().isoformat()
             )
-        
         return WalletInfo(
             keyword=keyword,
             index=index,
@@ -1550,7 +1563,6 @@ class HybridXRPManager:
     
     def derive_addresses(self, keyword: str = "default", count: int = 5) -> List[WalletInfo]:
         results = []
-        
         if self.crypto_type == "XLM":
             for i in range(count):
                 info = self.get_wallet_info(keyword, i)
@@ -1558,7 +1570,6 @@ class HybridXRPManager:
                 self._derived_wallets[f"{keyword}:{i}"] = info
             self.save()
             return results
-        
         for i in range(count):
             info = self.get_wallet_info(keyword, i)
             results.append(info)
@@ -1594,37 +1605,30 @@ class HybridXRPManager:
     
     def get_balance(self, force_refresh: bool = False) -> float:
         address = self.get_address()
-        
         if not force_refresh and address in self._balance_cache:
             balance, timestamp = self._balance_cache[address]
             if time.time() - timestamp < self._cache_ttl:
                 return balance
-        
         if self.crypto_type == "XLM":
             self._init_stellar()
             balance = self.stellar_manager.get_balance(address)
         else:
             balance = self._get_xrp_balance(address)
-        
         self._balance_cache[address] = (balance, time.time())
         return balance
     
     def get_account_info(self) -> Dict:
         address = self.get_address()
-        
         if self.crypto_type == "XLM":
             self._init_stellar()
             return self.stellar_manager.get_account_info(address)
-        
         try:
             from xrpl.account import get_account_info
             from xrpl.clients import JsonRpcClient
-            
             if self.network == "mainnet":
                 client = JsonRpcClient("https://s1.ripple.com:51234/")
             else:
                 client = JsonRpcClient("https://s.altnet.rippletest.net:51234/")
-            
             info = get_account_info(address, client)
             return {
                 "address": address,
@@ -1639,7 +1643,6 @@ class HybridXRPManager:
         if self.crypto_type != "XLM":
             logger.error("Friendbot works only for XLM")
             return False
-        
         address = self.get_address()
         self._init_stellar()
         return self.stellar_manager.fund_testnet(address)
@@ -1654,7 +1657,6 @@ class HybridXRPManager:
             return self.stellar_manager.send_payment(
                 from_secret, to_address, amount, memo_text, memo_id
             )
-        
         raise NotImplementedError("Use CLI send method for XRP")
     
 
@@ -1663,7 +1665,6 @@ class HybridXRPManager:
     # ============================================================
 
     def get_trustlines(self, force_refresh: bool = False) -> List[Dict]:
-        """List all trustlines of the wallet"""
         if self.crypto_type == "XRP":
             return self._get_xrp_trustlines(force_refresh)
         elif self.crypto_type == "XLM":
@@ -1673,38 +1674,26 @@ class HybridXRPManager:
     def _get_xrp_trustlines(self, force_refresh: bool = False) -> List[Dict]:
         from xrpl.models.requests import AccountLines
         from xrpl.clients import JsonRpcClient
-        
         urls = {
             "mainnet": "https://s1.ripple.com:51234/",
             "testnet": "https://s.altnet.rippletest.net:51234/",
             "devnet": "https://s.devnet.rippletest.net:51234/"
         }
         client = JsonRpcClient(urls.get(self.network, urls["testnet"]))
-        
         address = self.get_address()
         request = AccountLines(account=address, limit=200)
         response = client.request(request)
-        
-        # 🔥 LOAD TOKEN MAP FROM LOCAL FILE
         token_names = self._load_token_names()
-        
         trustlines = []
         for line in response.result.get("lines", []):
             currency_hex = line.get("currency", "")
-            
-            # 🔥 SEARCH FOR TOKEN NAME IN LOCAL MAP
             currency = token_names.get(currency_hex, currency_hex)
-            
-            # 🔥 IF NOT FOUND, TRY TO DECODE
             if currency == currency_hex:
                 currency = self._decode_currency_hex(currency_hex)
-            
             issuer = line.get("account", "")
             balance = float(line.get("balance", 0))
             limit = float(line.get("limit", 0))
-            
             is_active = (line.get("authorized", False) and line.get("peer_authorized", False)) or (balance > 0)
-            
             trustlines.append({
                 "currency": currency,
                 "currency_hex": currency_hex,
@@ -1721,7 +1710,6 @@ class HybridXRPManager:
         return trustlines
 
     def _load_token_names(self) -> Dict[str, str]:
-        """Load token map from local database"""
         token_file = DATA_DIR / "token_names.json"
         if token_file.exists():
             try:
@@ -1732,7 +1720,6 @@ class HybridXRPManager:
         return {}
 
     def _save_token_name(self, currency_hex: str, token_name: str):
-        """Save token name to local database"""
         token_file = DATA_DIR / "token_names.json"
         tokens = self._load_token_names()
         tokens[currency_hex] = token_name
@@ -1740,14 +1727,11 @@ class HybridXRPManager:
             json.dump(tokens, f, indent=2)
 
     def _get_xlm_trustlines(self, force_refresh: bool = False) -> List[Dict]:
-        """Get XLM (Stellar) trustlines from ledger"""
         self._init_stellar()
         if not self.stellar_manager:
             return []
-        
         address = self.get_address()
         account = self.stellar_manager.server.accounts().account_id(address).call()
-        
         trustlines = []
         for balance in account.get('balances', []):
             if balance['asset_type'] != 'native':
@@ -1764,7 +1748,6 @@ class HybridXRPManager:
         return trustlines
 
     def set_trustline(self, asset_code: str, issuer: str, limit: float = None) -> Dict:
-        """Create a new trustline on the ledger"""
         if self.crypto_type == "XRP":
             return self._set_xrp_trustline(asset_code, issuer, limit)
         elif self.crypto_type == "XLM":
@@ -1775,7 +1758,6 @@ class HybridXRPManager:
         from xrpl.models.transactions import TrustSet
         from xrpl.transaction import autofill, sign, submit_and_wait
         from xrpl.clients import JsonRpcClient
-        
         try:
             urls = {
                 "mainnet": "https://s1.ripple.com:51234/",
@@ -1783,7 +1765,6 @@ class HybridXRPManager:
                 "devnet": "https://s.devnet.rippletest.net:51234/"
             }
             client = JsonRpcClient(urls.get(self.network, urls["testnet"]))
-            
             wallet = self.get_wallet("default", 0)
             
             if len(asset_code) == 3:
@@ -1792,12 +1773,16 @@ class HybridXRPManager:
                 currency_hex = asset_code.encode('utf-8').hex().upper()
                 currency = currency_hex.ljust(40, '0')
             
-            if limit is None:
-                limit_value = "1000000000"
-            elif limit == 0:
+            if limit == 0:
                 limit_value = "0"
+                # 🔥 FLAG 0x00020000 = tfSetfAuth CON LIMITE 0!
+                # Questo forza la rimozione anche con balance residuo
+                flags = 0x00020000  # <-- tfSetfAuth
+                print(f"🗑️ Rimozione trustline per {asset_code} (flags=0x00020000)")
             else:
-                limit_value = str(limit)
+                limit_value = str(limit) if limit else "1000000000"
+                flags = 0x00020000
+                print(f"📤 Creazione trustline per {asset_code}")
             
             trust_set = TrustSet(
                 account=wallet.classic_address,
@@ -1806,20 +1791,19 @@ class HybridXRPManager:
                     "issuer": issuer,
                     "value": limit_value
                 },
-                flags=0x00020000 if limit != 0 else 0
+                flags=flags
             )
             
-            print(f"📤 Creating XRP trustline for {asset_code}")
             print(f"   Wallet: {wallet.classic_address}")
             print(f"   Issuer: {issuer}")
             print(f"   Currency: {currency}")
             print(f"   Limit: {limit_value}")
             print(f"   Network: {self.network.upper()}")
+            print(f"   Flags: {hex(flags)}")
             
             tx = autofill(trust_set, client)
             signed_tx = sign(tx, wallet)
             response = submit_and_wait(signed_tx, client)
-            
             tx_hash = response.result.get("hash", "unknown")
             
             return {
@@ -1829,45 +1813,37 @@ class HybridXRPManager:
                 "issuer": issuer,
                 "limit": limit_value,
                 "network": "XRPL",
+                "action": "removed" if limit == 0 else "created"
             }
         except Exception as e:
             return {"success": False, "error": str(e)}
 
     def _set_xlm_trustline(self, asset_code: str, issuer: str, limit: float = None) -> Dict:
-        """Create trustline on Stellar (ChangeTrust)"""
         self._init_stellar()
         if not self.stellar_manager:
             return {"success": False, "error": "Stellar manager not initialized"}
-        
         try:
             from stellar_sdk import Keypair, TransactionBuilder, Network, Asset
             from stellar_sdk.exceptions import BadRequestError
-            
             keypair = Keypair.from_secret(self.base_seed_stellar)
             source_account = self.stellar_manager.server.load_account(keypair.public_key)
-            
             asset = Asset(asset_code, issuer)
             limit_value = str(limit) if limit else "922337203685.4775807"
-            
             builder = TransactionBuilder(
                 source_account=source_account,
                 network_passphrase=self.stellar_manager.network_passphrase,
                 base_fee=100
             )
             builder.set_timeout(300)
-            
             builder.append_change_trust_op(
                 asset=asset,
                 limit=limit_value
             )
-            
             print(f"📤 Creating Stellar trustline for {asset_code}...")
             transaction = builder.build()
             transaction.sign(keypair)
             response = self.stellar_manager.server.submit_transaction(transaction)
-            
             tx_hash = response.get("hash", "unknown")
-            
             return {
                 "success": True,
                 "hash": tx_hash,
@@ -1882,17 +1858,12 @@ class HybridXRPManager:
             return {"success": False, "error": str(e)}
 
     def remove_trustline(self, asset_code: str, issuer: str) -> Dict:
-        """Remove a trustline (set limit = 0)"""
         result = self.set_trustline(asset_code, issuer, 0)
-        
-        # Delete from core
         if result.get("success"):
             self.delete_trustline_from_core(asset_code, issuer)
-        
         return result
 
     def get_trustline_balance(self, asset_code: str, issuer: str = None) -> Dict:
-        """Get balance of a specific trustline"""
         trustlines = self.get_trustlines(force_refresh=True)
         for tl in trustlines:
             if self.crypto_type == "XRP":
@@ -1918,29 +1889,24 @@ class HybridXRPManager:
     def send_with_trustline_check(self, to_address: str, amount: float, 
                                   asset_code: str = None, issuer: str = None,
                                   memo_text: str = "") -> Dict:
-        """Send with trustline verification"""
         if asset_code and issuer:
             try:
                 from xrpl.models.requests import AccountLines
                 from xrpl.clients import JsonRpcClient
-                
                 urls = {
                     "mainnet": "https://s1.ripple.com:51234/",
                     "testnet": "https://s.altnet.rippletest.net:51234/",
                     "devnet": "https://s.devnet.rippletest.net:51234/"
                 }
                 client = JsonRpcClient(urls.get(self.network, urls["testnet"]))
-                
                 request = AccountLines(account=to_address, limit=200)
                 response = client.request(request)
-                
                 has_trustline = False
                 for line in response.result.get("lines", []):
                     if line.get("currency") == asset_code and line.get("account") == issuer:
                         if line.get("authorized", False) and line.get("peer_authorized", False):
                             has_trustline = True
                             break
-                
                 if not has_trustline:
                     print(f"⚠️  Recipient does not have trustline for {asset_code}")
                     print("   Transaction may fail.")
@@ -1949,17 +1915,14 @@ class HybridXRPManager:
                         return {"success": False, "error": "Transaction cancelled"}
             except Exception as e:
                 print(f"⚠️  Cannot verify trustline: {e}")
-        
         if self.crypto_type == "XRP":
             return self.send_payment(to_address, amount, memo_text)
         else:
             return self.send_payment(to_address, amount, memo_text)
 
     def _decode_currency_hex(self, currency_hex: str) -> str:
-        """Decode XRP currency hex to readable code"""
         if len(currency_hex) == 3:
             return currency_hex
-        
         try:
             bytes_data = bytes.fromhex(currency_hex)
             while bytes_data and bytes_data[-1] == 0:
@@ -1969,7 +1932,6 @@ class HybridXRPManager:
                 return result
         except:
             pass
-        
         return currency_hex
 
     # ============================================================
@@ -1979,7 +1941,6 @@ class HybridXRPManager:
     def export_wallet(self, format: str = "json", include_private: bool = False) -> Union[str, Dict]:
         if not self.is_loaded():
             raise ValueError("No wallet loaded")
-        
         data = {
             "type": self.crypto_type,
             "network": self.network,
@@ -1988,7 +1949,6 @@ class HybridXRPManager:
             "created_at": datetime.now().isoformat(),
             "version": VERSION
         }
-        
         if include_private:
             if self.crypto_type == "XLM" and self.base_seed_stellar:
                 data["seed"] = self.base_seed_stellar
@@ -1996,15 +1956,12 @@ class HybridXRPManager:
                 data["seed"] = self.base_seed_xrp
             elif self.base_private:
                 data["private_key"] = self.base_private.hex()
-        
         if self.seed_type == SeedType.BIP39.value:
             data["mnemonic"] = self.seed_phrase
             data["passphrase"] = self.passphrase
-        
         elif self.seed_type == SeedType.NUMBERS.value:
             data["numbers"] = self.seed_numbers
             data["numbers_formatted"] = " ".join(self.seed_numbers)
-        
         if format == "json":
             return json.dumps(data, indent=2, ensure_ascii=False)
         elif format == "dict":
@@ -2012,36 +1969,37 @@ class HybridXRPManager:
         else:
             raise ValueError(f"Format not supported: {format}")
     
-    def import_wallet_from_file(self, filepath: str) -> Dict[str, Any]:
-        with open(filepath, 'r') as f:
-            data = json.load(f)
+    def import_wallet(self, seed_input: Union[str, List[str]], 
+                     passphrase: str = "", 
+                     input_type: str = "auto") -> Dict[str, Any]:
+        """Importa un wallet usando SECP256K1"""
+        if isinstance(seed_input, str):
+            seed_input = seed_input.strip()
+            if not seed_input:
+                raise ValueError("❌ Input seed is empty")
         
-        if "type" in data:
-            self.crypto_type = data["type"]
+        if input_type == "auto":
+            input_type = self.detect_input_type(seed_input)
         
-        if "network" in data:
-            self.network = data["network"]
+        if input_type == SeedType.BIP39.value:
+            if self.crypto_type == "XLM":
+                return self._import_bip39_as_stellar(seed_input, passphrase)
+            return self._import_bip39(seed_input, passphrase)  # <-- USA _import_bip39
         
-        if "mnemonic" in data:
-            return self.import_wallet(
-                data["mnemonic"], 
-                passphrase=data.get("passphrase", ""),
-                input_type=SeedType.BIP39.value
-            )
-        elif "numbers" in data:
-            return self.import_wallet(
-                data["numbers"], 
-                input_type=SeedType.NUMBERS.value
-            )
-        elif "seed" in data:
-            return self.import_wallet(data["seed"], input_type="auto")
-        elif "private_key" in data:
-            return self.import_wallet(
-                data["private_key"], 
-                input_type=SeedType.PRIVATE_KEY.value
-            )
+        elif input_type == SeedType.XRP_SEED.value:
+            return self._import_xrp_seed(seed_input)
+        
+        elif input_type == SeedType.PRIVATE_KEY.value:
+            return self._import_private_key(seed_input)
+        
+        elif input_type == SeedType.NUMBERS.value:
+            return self._import_numbers(seed_input)
+        
+        elif input_type == SeedType.STELLAR_SEED.value:
+            return self._import_stellar_seed(seed_input)
+        
         else:
-            raise ValueError("Unrecognized file format")
+            raise ValueError(f"Unsupported type: {input_type}")
     
     # ============================================================
     # PUBLIC METHODS - STATUS AND PERSISTENCE
@@ -2055,7 +2013,6 @@ class HybridXRPManager:
     def get_seed_info(self) -> Dict[str, Any]:
         if not self.is_loaded():
             return {"loaded": False}
-        
         info = {
             "loaded": True,
             "seed_type": self.seed_type,
@@ -2066,14 +2023,9 @@ class HybridXRPManager:
             "has_core": CORE_AVAILABLE and self._core_initialized,
             "core_identity": self._core_identity_id
         }
-        
-        # ============================================================
-        # 🔥 AGGIUNGI PRIVATE KEY OVUNQUE SIA DISPONIBILE
-        # ============================================================
         if self.base_private:
             info["private_key"] = self.base_private.hex()
         elif self.base_seed_xrp:
-            # Deriva dal seed XRP
             try:
                 from xrpl.core import keypairs
                 _, private_key = keypairs.derive_keypair(self.base_seed_xrp)
@@ -2081,16 +2033,13 @@ class HybridXRPManager:
             except:
                 pass
         elif self.base_seed_stellar:
-            # Per Stellar, il seed è la private key
             info["private_key"] = self.base_seed_stellar
-        
         try:
             balance = self.get_balance()
             info["balance"] = balance
             info["has_balance"] = True
         except:
             pass
-        
         if self.seed_type == SeedType.BIP39.value:
             info.update({
                 "seed_phrase": self.seed_phrase,
@@ -2099,37 +2048,30 @@ class HybridXRPManager:
                 "seed_xrp": self.base_seed_xrp,
                 "seed_stellar": self.base_seed_stellar,
             })
-        
         elif self.seed_type == SeedType.NUMBERS.value:
             info.update({
                 "secret_numbers": self.seed_numbers,
                 "formatted": self._format_numbers(self.seed_numbers) if self.seed_numbers else "",
                 "seed_xrp": self.base_seed_xrp,
             })
-        
         elif self.seed_type == SeedType.PRIVATE_KEY.value:
             info.update({
                 "seed_xrp": self.base_seed_xrp,
             })
-        
         elif self.seed_type == SeedType.XRP_SEED.value:
             info.update({
                 "seed_xrp": self.base_seed_xrp,
             })
-        
         elif self.seed_type == SeedType.STELLAR_SEED.value:
             info.update({
                 "seed_stellar": self.base_seed_stellar,
             })
-        
-        # Add core trustlines count
         if CORE_AVAILABLE and self._core_initialized:
             try:
                 core_tls = self.get_core_trustlines()
                 info["core_trustlines"] = len(core_tls)
             except:
                 pass
-        
         return info
     
     def reset(self) -> None:
@@ -2144,20 +2086,21 @@ class HybridXRPManager:
         self._derived_wallets = {}
         self._balance_cache = {}
         self.stellar_manager = None
-        
-        # Reset core
         self._core_identity_id = None
         
-        # 🔥 PULISCI I FILE CIFRATI
-        for db in ["wallet_core.db", "wallet_cli.db"]:
-            enc_path = f"{db}.enc"
-            if os.path.exists(enc_path):
-                os.remove(enc_path)
-            if os.path.exists(db):
-                os.remove(db)
+        # 🔥 PULISCI SOLO wallet_cli.db
+        db_path = DATA_DIR / "wallet_cli.db"
+        if os.path.exists(db_path):
+            os.remove(db_path)
         
         if self.data_file.exists():
             self.data_file.unlink()
+        
+        logger.info("✅ Wallet reset complete")
+    
+    # ============================================================
+    # 🔥 SAVE - CIFRA SOLO wallet_cli.db
+    # ============================================================
     
     def save(self) -> None:
         if not self.is_loaded():
@@ -2188,9 +2131,8 @@ class HybridXRPManager:
         
         self.data_file.parent.mkdir(parents=True, exist_ok=True)
         
-        # 🔥 SALVA CIFRATO SE C'È UNA PASSWORD
         try:
-            from core_wrapper import encrypt_wallet, is_encrypted_wallet
+            from core_wrapper import encrypt_wallet
             
             if self._wallet_password:
                 json_str = json.dumps(data, indent=2, default=str)
@@ -2203,37 +2145,76 @@ class HybridXRPManager:
                     json.dump(data, f, indent=2)
                 print(f"✅ Wallet saved (UNENCRYPTED) to {self.data_file}")
         except Exception as e:
-            # Fallback: salva in chiaro
             print(f"⚠️ Encryption error: {e}, saving unencrypted")
             with open(self.data_file, "w") as f:
                 json.dump(data, f, indent=2)
         
-        # 🔥 CIFRA I DB SQLITE
+        # 🔥 CHIUDI IL CORE PRIMA DI CIFRARE IL DB
+        if self._core_initialized and self._core:
+            try:
+                self._core = None
+                self._core_initialized = False
+                print("🔐 Core chiuso per cifratura DB")
+            except:
+                pass
+        
+        # 🔥 CIFRA SOLO wallet_cli.db
         if self._wallet_password:
-            for db in ["wallet_core.db", "wallet_cli.db"]:
-                self._encrypt_db(db)
+            db_path = DATA_DIR / "wallet_cli.db"
+            if os.path.exists(db_path):
+                try:
+                    from core_wrapper import encrypt_db_bytes
+                    with open(db_path, 'rb') as f:
+                        db_bytes = f.read()
+                    encrypted = encrypt_db_bytes(db_bytes, self._wallet_password)
+                    if isinstance(encrypted, str):
+                        with open(db_path, 'w') as f:
+                            f.write(encrypted)
+                    else:
+                        with open(db_path, 'wb') as f:
+                            f.write(encrypted)
+                    print(f"🔐 Encrypted wallet_cli.db")
+                except Exception as e:
+                    print(f"⚠️ Error encrypting wallet_cli.db: {e}")
         
         logger.info(f"✅ Wallet saved to {self.data_file}")
+    
+    # ============================================================
+    # 🔥 LOAD - DECIFRA SOLO wallet_cli.db
+    # ============================================================
     
     def load(self) -> bool:
         if not self.data_file.exists():
             return False
         
         try:
-            # 🔥 SE IL FILE È CIFRATO, DECIFRALO PRIMA DI LEGGERLO
+            # 🔥 DECIFRA SOLO wallet_cli.db
+            if self._wallet_password:
+                db_path = DATA_DIR / "wallet_cli.db"
+                if os.path.exists(db_path):
+                    try:
+                        from core_wrapper import decrypt_db_bytes, is_encrypted_file
+                        if is_encrypted_file(db_path):
+                            with open(db_path, 'r') as f:
+                                encrypted_str = f.read()
+                            decrypted_bytes = decrypt_db_bytes(encrypted_str, self._wallet_password)
+                            with open(db_path, 'wb') as f:
+                                f.write(decrypted_bytes)
+                            print(f"🔐 Decrypted wallet_cli.db")
+                    except Exception as e:
+                        print(f"⚠️ Error decrypting wallet_cli.db: {e}")
+            
+            # 🔥 DECIFRA xrp_data.json
             if self._wallet_password:
                 try:
-                    from core_wrapper import is_encrypted_file, decrypt_file
-                    if is_encrypted_file(str(self.data_file)):
-                        temp_path = str(self.data_file) + ".tmp"
-                        decrypt_file(str(self.data_file), self._wallet_password, temp_path)
-                        # Leggi dal file decifrato
-                        with open(temp_path, 'r') as f:
-                            data = json.load(f)
-                        os.remove(temp_path)
+                    from core_wrapper import decrypt_wallet, is_encrypted_wallet
+                    with open(self.data_file, 'r') as f:
+                        content = f.read().strip()
+                    if content and is_encrypted_wallet(content):
+                        json_str = decrypt_wallet(content, self._wallet_password)
+                        data = json.loads(json_str)
                     else:
-                        with open(self.data_file) as f:
-                            data = json.load(f)
+                        data = json.loads(content)
                 except ImportError:
                     with open(self.data_file) as f:
                         data = json.load(f)
@@ -2264,14 +2245,15 @@ class HybridXRPManager:
                     self.base_seed_stellar = keypair.secret
                     self._correct_address = keypair.public_key
                 else:
+                    # 🔥 RIGENERA DA MNEMONIC CON SECP256K1
                     private_key_hex = self._bip39_to_private_key(self.seed_phrase, self.passphrase)
-                    self.base_private = bytes.fromhex(private_key_hex)
-                    if not self._correct_address:
+                    if self._validate_secp256k1(private_key_hex):
+                        self.base_private = bytes.fromhex(private_key_hex)
                         _, addr = self._private_key_to_keypair(private_key_hex)
                         self._correct_address = addr
-                    if not self.base_seed_xrp:
-                        entropy = private_key_hex[:32]
-                        self.base_seed_xrp = keypairs.generate_seed(entropy=entropy)
+                        if not self.base_seed_xrp:
+                            entropy = private_key_hex[:32]
+                            self.base_seed_xrp = keypairs.generate_seed(entropy=entropy)
             
             elif self.seed_type == SeedType.NUMBERS.value and self.seed_numbers:
                 try:
@@ -2283,12 +2265,6 @@ class HybridXRPManager:
                         self._correct_address = wallet.classic_address
                 except Exception as e:
                     logger.error(f"Error loading numbers: {e}")
-                    xrp_seed = self._numbers_to_seed_fallback(self.seed_numbers)
-                    self.base_seed_xrp = xrp_seed
-                    public_key, private_key = keypairs.derive_keypair(xrp_seed)
-                    self.base_private = bytes.fromhex(private_key)
-                    if not self._correct_address:
-                        self._correct_address = keypairs.derive_classic_address(public_key)
             
             for wallet_data in data.get("derived_wallets", []):
                 try:
@@ -2299,12 +2275,7 @@ class HybridXRPManager:
             
             logger.info(f"✅ Wallet loaded from {self.data_file}")
             
-            # 🔥 DECIFRA I DB SQLITE SE NECESSARIO
-            if self._wallet_password:
-                for db in ["wallet_core.db", "wallet_cli.db"]:
-                    self._decrypt_db_if_needed(db)
-            
-            # Sync with core after load
+            # 🔥 RIAVVIA IL CORE DOPO AVER DECIFRATO IL DB
             if CORE_AVAILABLE:
                 self._init_core()
                 self._sync_core_identity()
@@ -2314,6 +2285,25 @@ class HybridXRPManager:
         except Exception as e:
             logger.error(f"Error loading wallet: {e}")
             return False
+    
+    # ============================================================
+    # 🔥 CLOSE - PULISCE I FILE TEMPORANEI
+    # ============================================================
+    
+    def close(self) -> None:
+        """Chiude il core e pulisce i file temporanei"""
+        if self._core_initialized:
+            self._core = None
+            self._core_initialized = False
+        
+        # Cancella file temporaneo
+        if hasattr(self, '_temp_db_path') and self._temp_db_path:
+            try:
+                if os.path.exists(self._temp_db_path):
+                    os.unlink(self._temp_db_path)
+                    print(f"🗑️ Removed temp DB: {self._temp_db_path}")
+            except:
+                pass
 
 
 # ============================================================
@@ -2322,49 +2312,38 @@ class HybridXRPManager:
 
 def create_manager(data_file: str = "wallet_data.json", 
                   crypto_type: str = "XRP", 
-                  network: str = "testnet") -> HybridXRPManager:
+                  network: str = "testnet",
+                  password: str = None) -> HybridXRPManager:
     """Factory function to create a configured manager"""
-    manager = HybridXRPManager(data_file)
+    manager = HybridXRPManager(data_file, password=password)
     manager.set_crypto(crypto_type)
     manager.set_network(network)
     return manager
 
 
-# ============================================================
-# TEST
-# ============================================================
-
 if __name__ == "__main__":
-    # Quick test
-    manager = HybridXRPManager("test_wallet.json")
-    
+    manager = HybridXRPManager("test_wallet.json", password="test123")
+    manager.initialize("test123")
     print("=" * 60)
     print("🧪 WALLET MANAGER TEST")
     print("=" * 60)
-    
     print("\n📤 Creating XRP wallet...")
     wallet = manager.create_new_wallet_bip39()
     print(f"✅ Address: {wallet['first_address']}")
     print(f"✅ Seed XRP: {wallet['first_seed_xrp']}")
-    
     balance = manager.get_balance()
     print(f"💰 Balance: {balance} XRP")
-    
     print("\n📤 Deriving addresses...")
     addresses = manager.derive_addresses("test", 3)
     for addr in addresses:
         print(f"  - {addr.address}")
-    
-    # Test core integration
     if CORE_AVAILABLE:
         print("\n🔗 Testing core integration...")
         identity = manager.get_core_identity()
         print(f"  Core Identity: {identity}")
-        
         trustlines = manager.sync_trustlines_with_core()
         print(f"  Trustlines synced: {len(trustlines)}")
-        
         core_tls = manager.get_core_trustlines()
         print(f"  Trustlines in core: {len(core_tls)}")
-    
     print("\n✅ Test complete!")
+    manager.close()

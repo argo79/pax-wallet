@@ -43,8 +43,11 @@ class UnifiedWallet:
     - Futuro: Reticulum
     """
     
-    def __init__(self, db_path: str = "wallet.db"):
-        self.core = create_core(db_path)
+    def __init__(self, db_path: str = "wallet.db", password: str = None):
+        self._db_path = db_path
+        # 🔥 NON CREARE IL CORE QUI! Sarà creato da wallet_manager!
+        self.core = None
+        self._password = password
         self._xrp_manager: Optional[HybridXRPManager] = None
         self._initialized = False
         self.logger = logging.getLogger(__name__)
@@ -53,24 +56,46 @@ class UnifiedWallet:
     # INIZIALIZZAZIONE
     # ============================================================
     
-    def init_xrp(self, data_file: str = "xrp_data.json", network: str = "testnet", crypto: str = "XRP"):
+    def init_xrp(self, data_file: str = "xrp_data.json", network: str = "testnet", crypto: str = "XRP", password: str = None):
         if not PLUGIN_XRP_AVAILABLE:
             raise ImportError("Plugin XRP/XLM non disponibile")
         
         if self._xrp_manager is None:
             if crypto is None or crypto.lower() == "auto":
                 crypto = "XRP"
+            
+            # 🔥 USA LA PASSWORD PASSATA O QUELLA DEL COSTRUTTORE
+            pwd = password or self._password
+            
             self._xrp_manager = wm.create_manager(
                 data_file=data_file,
                 crypto_type=crypto,
-                network=network
+                network=network,
+                password=pwd
             )
+            
+            # 🔥 ORA IL CORE È INIZIALIZZATO DA wallet_manager (se password fornita)
+            if self._xrp_manager and hasattr(self._xrp_manager, 'core'):
+                self.core = self._xrp_manager.core
+            
             self._initialized = True
             self.logger.info(f"✅ Manager {crypto} inizializzato su {network}")
         return self._xrp_manager
     
-    def init_xlm(self, data_file: str = "xlm_data.json", network: str = "testnet"):
-        return self.init_xrp(data_file, network, "XLM")
+    def init_xlm(self, data_file: str = "xlm_data.json", network: str = "testnet", password: str = None):
+        return self.init_xrp(data_file, network, "XLM", password)
+    
+    # ============================================================
+    # CARICAMENTO
+    # ============================================================
+    
+    def load(self, password: str) -> bool:
+        """Carica il wallet con la password"""
+        if not self._xrp_manager:
+            return False
+        
+        self._password = password
+        return self._xrp_manager.initialize(password)
     
     # ============================================================
     # IDENTITA'
@@ -78,18 +103,20 @@ class UnifiedWallet:
     
     def create_wallet(self, name: str = None, crypto_type: str = "XRP", strength: int = 256, passphrase: str = "") -> Dict[str, Any]:
         """Crea un nuovo wallet con strength (128=12 parole, 256=24 parole) e passphrase opzionale"""
-        identity_id = self.core.create_identity(name)
-        
         if not self._xrp_manager:
             self.init_xrp(crypto=crypto_type)
         
+        # 🔥 USA IL CORE DAL MANAGER
+        if self.core is None and self._xrp_manager and hasattr(self._xrp_manager, 'core'):
+            self.core = self._xrp_manager.core
+        
+        identity_id = self.core.create_identity(name) if self.core else None
+        
         if crypto_type == "XRP":
-            # 🔥 PASSA PASSPHRASE
             wallet_data = self._xrp_manager.create_new_wallet_bip39(passphrase=passphrase, strength=strength)
             self._xrp_manager.save()
         elif crypto_type == "XLM":
             self._xrp_manager.set_crypto("XLM")
-            # 🔥 PASSA PASSPHRASE (se supportata da Stellar)
             wallet_data = self._xrp_manager.create_new_wallet_stellar(passphrase=passphrase, strength=strength)
             self._xrp_manager.save()
         else:
@@ -111,10 +138,14 @@ class UnifiedWallet:
                       crypto_type: str = "auto",
                       passphrase: str = "") -> Dict[str, Any]:
         """Importa un wallet con passphrase opzionale"""
-        identity_id = self.core.create_identity(name)
-        
         if not self._xrp_manager:
             self.init_xrp(crypto="XRP")
+        
+        # 🔥 USA IL CORE DAL MANAGER
+        if self.core is None and self._xrp_manager and hasattr(self._xrp_manager, 'core'):
+            self.core = self._xrp_manager.core
+        
+        identity_id = self.core.create_identity(name) if self.core else None
         
         if crypto_type is None or crypto_type.lower() == "auto":
             detected_type = self._xrp_manager.detect_input_type(seed_input)
@@ -125,7 +156,6 @@ class UnifiedWallet:
         else:
             self._xrp_manager.set_crypto(crypto_type)
         
-        # 🔥 PASSA PASSPHRASE ALL'IMPORT
         if passphrase:
             result = self._xrp_manager.import_wallet(seed_input, passphrase=passphrase)
         else:
@@ -195,18 +225,13 @@ class UnifiedWallet:
         if self._xrp_manager:
             self._xrp_manager.save()
     
-    def load(self) -> bool:
-        if self._xrp_manager:
-            return self._xrp_manager.load()
-        return False
-    
     # ============================================================
     # INFO
     # ============================================================
     
     def get_info(self) -> Dict[str, Any]:
         info = {
-            "core": self.core.info(),
+            "core": self.core.info() if self.core else {"error": "Core not initialized"},
             "xrp_initialized": self._xrp_manager is not None,
         }
         
@@ -266,17 +291,17 @@ class UnifiedWallet:
 # 4. FUNZIONI FACTORY
 # ============================================================
 
-def create_wallet(db_path: str = "wallet.db", crypto: str = "XRP", network: str = "testnet") -> UnifiedWallet:
+def create_wallet(db_path: str = "wallet.db", crypto: str = "XRP", network: str = "testnet", password: str = None) -> UnifiedWallet:
     """Crea un'istanza del wallet unificato"""
-    wallet = UnifiedWallet(db_path)
-    wallet.init_xrp(crypto=crypto, network=network)
+    wallet = UnifiedWallet(db_path, password=password)
+    wallet.init_xrp(crypto=crypto, network=network, password=password)
     return wallet
 
-def create_xrp_wallet(db_path: str = "wallet.db", network: str = "testnet") -> UnifiedWallet:
-    return create_wallet(db_path, "XRP", network)
+def create_xrp_wallet(db_path: str = "wallet.db", network: str = "testnet", password: str = None) -> UnifiedWallet:
+    return create_wallet(db_path, "XRP", network, password)
 
-def create_xlm_wallet(db_path: str = "wallet.db", network: str = "testnet") -> UnifiedWallet:
-    return create_wallet(db_path, "XLM", network)
+def create_xlm_wallet(db_path: str = "wallet.db", network: str = "testnet", password: str = None) -> UnifiedWallet:
+    return create_wallet(db_path, "XLM", network, password)
 
 # ============================================================
 # 5. TEST
@@ -289,13 +314,13 @@ if __name__ == "__main__":
     
     # Test XRP
     print("\n📤 Test XRP...")
-    wallet_xrp = create_xrp_wallet("test_xrp.db")
+    wallet_xrp = create_xrp_wallet("test_xrp.db", password="test123")
     result = wallet_xrp.create_wallet("Marco", "XRP")
     print(f"   Address XRP: {result['address']}")
     
     # Test XLM
     print("\n📤 Test XLM...")
-    wallet_xlm = create_xlm_wallet("test_xlm.db")
+    wallet_xlm = create_xlm_wallet("test_xlm.db", password="test123")
     result = wallet_xlm.create_wallet("Marco", "XLM")
     print(f"   Address XLM: {result['address']}")
     

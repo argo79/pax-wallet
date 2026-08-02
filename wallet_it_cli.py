@@ -1,103 +1,27 @@
 #!/usr/bin/env python3
 """
-wallet_cli.py - CLI per wallet XRP/XLM con supporto multi-wallet, trustline, token e Reticulum
+paxwallet.py - CLI Frontend per PAX Wallet
+Usa WalletBackend per TUTTA la logica
+Solo UI e menu - ~600 righe
 """
 
 import sys
 import json
-import re
-import logging
-import time
+import getpass
 import os
+import time
 from pathlib import Path
-from datetime import datetime
-from typing import Optional, List, Dict, Any, Union
-import threading
+from typing import Optional, Dict, Any, List
 
 # ============================================================
-# VERSIONE
-# ============================================================
-VERSION = "0.9.2b"
-__version__ = VERSION
-
-
-# ============================================================
-# PATCH PER RETICULUM - DEVE ESSERE PRIMA DI TUTTO!
-# ============================================================
-import RNS
-try:
-    from RNS.Interfaces import Interface
-except ImportError:
-    class Interface:
-        pass
-    setattr(RNS, 'Interface', Interface)
-    if not hasattr(RNS, 'Interfaces'):
-        class Interfaces:
-            pass
-        RNS.Interfaces = Interfaces
-    setattr(RNS.Interfaces, 'Interface', Interface)
-
-from core_wrapper import create_core, CoreWallet, get_core_path
-from wallet_api import create_wallet, UnifiedWallet
-
-import colorama
-colorama.init()
-
-# ============================================================
-# IMPORT COMANDI XLM
+# IMPORTA IL BACKEND E LE UTILITY CONDIVISE
 # ============================================================
 
-try:
-    from commands.xlm_commands import send_xlm, history_xlm, info_xlm, faucet_xlm
-    XLM_AVAILABLE = True
-except ImportError as e:
-    XLM_AVAILABLE = False
-    def send_xlm(cli):
-        print("❌ Comando XLM non disponibile. Installa stellar-sdk")
-    def history_xlm(cli):
-        print("❌ Comando XLM non disponibile. Installa stellar-sdk")
-    def info_xlm(cli):
-        print("❌ Comando XLM non disponibile. Installa stellar-sdk")
-    def faucet_xlm(cli):
-        print("❌ Comando XLM non disponibile. Installa stellar-sdk")
-
+from wallet_backend import WalletBackend, create_backend, Colors, format_time_ago, parse_tx_date
 
 # ============================================================
-# IMPORT RETICULUM MANAGER
+# FUNZIONI DI STAMPA CON COLORI (USANO Colors DAL BACKEND)
 # ============================================================
-
-try:
-    from reticulum.reticulum_manager import ReticulumManager, ReticulumConfig
-    RETICULUM_AVAILABLE = True
-except ImportError as e:
-    RETICULUM_AVAILABLE = False
-    print(f"⚠️ Reticulum non disponibile: {e}")
-
-
-# ============================================================
-# IMPORT METRICHE
-# ============================================================
-
-try:
-    from reticulum.gateway_metrics import GatewayMetrics
-    METRICS_AVAILABLE = True
-except ImportError as e:
-    METRICS_AVAILABLE = False
-    print(f"⚠️ Metriche non disponibili: {e}")
-
-
-# ============================================================
-# 2. COLORI PER OUTPUT
-# ============================================================
-
-class Colors:
-    GREEN = '\033[92m'
-    YELLOW = '\033[93m'
-    BLUE = '\033[94m'
-    RED = '\033[91m'
-    CYAN = '\033[96m'
-    BOLD = '\033[1m'
-    RESET = '\033[0m'
 
 def print_green(msg): print(f"{Colors.GREEN}{msg}{Colors.RESET}")
 def print_yellow(msg): print(f"{Colors.YELLOW}{msg}{Colors.RESET}")
@@ -108,522 +32,539 @@ def print_bold(msg): print(f"{Colors.BOLD}{msg}{Colors.RESET}")
 
 
 # ============================================================
-# 3. WALLET CLI
+# UTILITY (solo specifiche del frontend)
 # ============================================================
 
-class WalletCLI:
-    def __init__(self, password: str = None):
-        self.wallet: Optional[UnifiedWallet] = None
-        self.data_file = "wallet_cli.db"
-        self.wallets_dir = Path("wallets")
-        self.wallets_dir.mkdir(exist_ok=True)
-        self.active_wallet_name_file = Path("active_wallet.txt")
-        self.rubrica_file = Path("rubrica.json")
-        self._interactive_mode = False
-        
-        self._wallet_password = password
-        self._password_verified = bool(password)
-        
-        # ============================================================
-        # RETICULUM - SINGLETON PER TUTTA LA SESSIONE
-        # ============================================================
-        self.reticulum: Optional[ReticulumManager] = None
-        self.reticulum_initialized = False
-        self.reticulum_config = ReticulumConfig()
-        self.metrics = None
+def format_address(address: str, length: int = 25) -> str:
+    if not address:
+        return "N/A"
+    if len(address) <= length:
+        return address
+    return address[:length] + "..."
 
-        # Inizializza Reticulum all'avvio della CLI (una volta sola)
-        if RETICULUM_AVAILABLE:
-            self._init_reticulum()
 
-    def _validate_wallet_name(self, name: str) -> bool:
-        """Verifica che il nome del wallet sia sicuro (solo caratteri validi)"""
-        if not name:
-            print_red("❌ Nome wallet vuoto")
-            return False
-        if not re.match(r'^[a-zA-Z0-9_-]+$', name):
-            print_red(f"❌ Nome wallet non valido: {name}")
-            print_yellow("   Usa solo lettere, numeri, underscore (_) e trattini (-)")
-            return False
-        return True
+# ============================================================
+# CLASSE CLI
+# ============================================================
 
-    def _init_reticulum(self):
-        """Inizializza Reticulum UNA SOLA VOLTA all'avvio della CLI"""
-        if not RETICULUM_AVAILABLE:
-            return
-        
-        if not self.reticulum_initialized:
-            # 1. CREA RETICULUM MANAGER
-            self.reticulum = ReticulumManager()
-            
-            # 2. CREA METRICS E IMPOSTA NEL MANAGER (PRIMA DI init!)
-            if METRICS_AVAILABLE:
-                try:
-                    self.metrics = GatewayMetrics(self.reticulum.identity)
-                    self.metrics.set_my_gateway_id(self.reticulum.gateway_address)
-                    
-                    # ============================================================
-                    # 🔥 IMPOSTA use_internet DAL CONFIG!
-                    # ============================================================
-                    if hasattr(self.reticulum, 'config'):
-                        self.metrics.set_use_internet(self.reticulum.config.use_internet)
-                        self.metrics.set_ledger_timeout(self.reticulum.config.ledger_timeout_seconds)
-                        self.metrics.set_ledger_check_interval(self.reticulum.config.ledger_check_interval)
-                    
-                    # 🔥 IMPOSTA METRICS NEL MANAGER (PRIMA DI init!)
-                    self.reticulum.set_metrics(self.metrics)
-                    print_green("📡 Metrics create e collegate")
-                except Exception as e:
-                    print_yellow(f"⚠️ Errore avvio metriche: {e}")
-                    self.metrics = None
-            
-            # 3. ORA init() TROVERÀ metrics NON None
-            self.reticulum.init()
-            self.reticulum_initialized = True
-            
-            # Avvia query loop
-            if METRICS_AVAILABLE and self.metrics:
-                try:
-                    self.metrics.start_query_loop(
-                        interval=3600,
-                        max_peers=10,
-                        max_hops=3
-                    )
-                    print_green("📡 Metriche gateway avviate")
-                except Exception as e:
-                    print_yellow(f"⚠️ Errore avvio query loop: {e}")
-            else:
-                print_yellow("⚠️ Metrics non disponibili, alcune funzioni Reticulum potrebbero non funzionare")
-            
-            status = self.reticulum.get_status()
-            print_green("📡 Reticulum attivo per tutta la sessione")
-            print_yellow(f"   Gateway Hash: {status.get('gateway_address', 'N/A')}")
-            print_yellow(f"   Wallet Hash:  {status.get('wallet_address', 'N/A')}")
-            if self.metrics:
-                print_green(f"   Metrics: ✅ Disponibili")
-            else:
-                print_red(f"   Metrics: ❌ NON DISPONIBILI")
+class PaxWalletCLI:
+    """Frontend CLI per PAX Wallet - USA IL BACKEND"""
+    
+    def __init__(self):
+        self.backend: Optional[WalletBackend] = None
+        self._password: Optional[str] = None
+        self._running = True
 
-    def init(self, network: str = None):
-        """Inizializza il wallet"""
-        active = self._get_active_wallet_name()
+    # ============================================================
+    # UNLOCK
+    # ============================================================
+    
+    def _unlock(self) -> bool:
+        """Chiede la password e inizializza il backend"""
+        print("\n" + "=" * 60)
+        print("  🔐 PAX WALLET - UNLOCK")
+        print("=" * 60)
+        print("")
         
-        # ============================================================
-        # VALIDA IL NOME DEL WALLET ATTIVO PRIMA DI USARLO
-        # ============================================================
-        if active:
-            # Validazione del nome
-            if not self._validate_wallet_name(active):
-                print_red(f"⚠️ Nome wallet attivo non valido: {active}")
-                active = None
+        temp_backend = create_backend()
+        has_encrypted = temp_backend._has_encrypted_files()
         
-        if active:
-            wallet_file = self.wallets_dir / f"{active}.json"
+        if has_encrypted:
+            print("   Inserisci la password per sbloccare il wallet.")
+            print("")
+            max_attempts = 3
+            attempts = 0
             
-            # Path traversal protection
-            try:
-                wallet_file.resolve().relative_to(self.wallets_dir.resolve())
-            except ValueError:
-                print_red(f"❌ Percorso non valido: {wallet_file}")
-                network = "testnet"
-                crypto = "XRP"
-                active = None
-            
-            if active and wallet_file.exists():
-                try:
-                    with open(wallet_file) as f:
-                        data = json.load(f)
-                        network = data.get("network", "testnet")
-                        crypto = data.get("crypto_type", "XRP")
-                except:
-                    network = "testnet"
-                    crypto = "XRP"
-            else:
-                network = "testnet"
-                crypto = "XRP"
-        else:
-            network = "testnet"
-            crypto = "XRP"
-        
-        self.wallet = create_wallet(self.data_file)
-        self.wallet.init_xrp(network=network, crypto=crypto)
-        
-        # 🔥 CARICA IL WALLET SALVATO
-        loaded = self.wallet._xrp_manager.load()
-        if loaded:
-            network = self.wallet._xrp_manager.network
-            crypto = self.wallet._xrp_manager.crypto_type
-        
-        if self.wallet._xrp_manager:
-            self.wallet._xrp_manager.set_network(network)
-            self.wallet._xrp_manager.set_crypto(crypto)
-        
-        print_green(f"✅ Wallet: {active or 'nuovo'} | Rete: {network.upper()} | Crypto: {crypto}")
-        return self.wallet
-    
-    def _get_active_wallet_name(self) -> str:
-        if self.active_wallet_name_file.exists():
-            return self.active_wallet_name_file.read_text().strip()
-        return ""
-    
-    def _set_active_wallet_name(self, name: str) -> None:
-        if not self._validate_wallet_name(name):
-            return
-        with open(self.active_wallet_name_file, "w") as f:
-            f.write(name)
-    
-    def _get_wallet_list(self) -> List[Dict]:
-        wallets = []
-        for file in self.wallets_dir.glob("*.json"):
-            try:
-                with open(file) as f:
-                    data = json.load(f)
-                    address = data.get("current_address", "unknown")
-                    if address == "unknown":
-                        derived = data.get("derived_wallets", [])
-                        if derived:
-                            address = derived[0].get("address", "unknown")
-                    
-                    wallets.append({
-                        "name": file.stem,
-                        "address": address,
-                        "address_short": address[:8] + "..." if address != "unknown" else "❌",
-                        "crypto": data.get("crypto_type", "XRP"),
-                        "network": data.get("network", "testnet"),
-                    })
-            except Exception as e:
-                pass
-        return wallets
-    
-    def _get_contatti(self) -> List[Dict]:
-        if not self.rubrica_file.exists():
-            return []
-        try:
-            with open(self.rubrica_file) as f:
-                data = json.load(f)
-                return data.get("contatti", [])
-        except:
-            return []
-    
-    def _cerca_contatto(self, nome: str) -> Optional[Dict]:
-        contatti = self._get_contatti()
-        for c in contatti:
-            if c.get("nome", "").lower() == nome.lower():
-                return c
-        return None
-    
-    def _save_wallet_as(self, name: str) -> bool:
-        if not self.wallet or not self.wallet._xrp_manager:
-            return False
-        
-        if not self._validate_wallet_name(name):
-            return False
-        
-        manager = self.wallet._xrp_manager
-        
-        if not manager.is_loaded():
-            return False
-        
-        dest = self.wallets_dir / f"{name}.json"
-        
-        # Path traversal protection
-        try:
-            dest.resolve().relative_to(self.wallets_dir.resolve())
-        except ValueError:
-            print_red(f"❌ Invalid path: {dest}")
-            return False
-        
-        correct_address = manager._correct_address
-        if not correct_address:
-            try:
-                correct_address = manager.get_address("default", 0)
-            except:
-                correct_address = None
-        
-        data = {
-            "seed_type": manager.seed_type,
-            "seed_phrase": manager.seed_phrase,
-            "seed_numbers": manager.seed_numbers,
-            "passphrase": manager.passphrase,
-            "base_private": manager.base_private.hex() if manager.base_private else None,
-            "base_seed_xrp": manager.base_seed_xrp,
-            "base_seed_stellar": manager.base_seed_stellar,
-            "current_address": correct_address,
-            "network": manager.network,
-            "crypto_type": manager.crypto_type,
-            "created_at": datetime.now().isoformat(),
-            "derived_wallets": [info.to_dict() for info in manager._derived_wallets.values()]
-        }
-        
-        # 🔥 SALVA SEMPRE CIFRATO
-        try:
-            from core_wrapper import encrypt_wallet
-            
-            json_str = json.dumps(data, indent=2, default=str)
-            encrypted = encrypt_wallet(json_str, self._wallet_password)
-            with open(dest, 'w') as f:
-                f.write(encrypted)
-            
-            print_green(f"✅ Wallet '{name}' saved (ENCRYPTED)")
-        except Exception as e:
-            print_red(f"❌ Encryption error: {e}")
-            return False
-        
-        print_yellow(f"🌐 Network saved: {manager.network.upper()}")
-        print_yellow(f"🪙 Crypto saved: {manager.crypto_type}")
-        return True
-    
-    def _switch_wallet(self, name: str) -> bool:
-        """Switch to the specified wallet"""
-        if not self._validate_wallet_name(name):
-            return False
-        
-        source = self.wallets_dir / f"{name}.json"
-        
-        try:
-            source.resolve().relative_to(self.wallets_dir.resolve())
-        except ValueError:
-            print_red(f"❌ Invalid path: {source}")
-            return False
-        
-        if not source.exists():
-            return False
-        
-        try:
-            from core_wrapper import encrypt_wallet, decrypt_wallet, is_encrypted_wallet
-            
-            with open(source, 'r') as f:
-                content = f.read().strip()
-            
-            # 🔥 DECIFRA
-            if is_encrypted_wallet(content):
-                if not self._wallet_password:
-                    print_red("❌ Wallet encrypted but no password!")
+            while attempts < max_attempts:
+                password = getpass.getpass("🔐 Password: ")
+                if not password:
+                    print_red("❌ La password non può essere vuota")
+                    attempts += 1
+                    continue
+                
+                # 🔥 PROVA A INIZIALIZZARE CON QUESTA PASSWORD
+                self.backend = create_backend(password)
+                result = self.backend.init()
+                
+                # Verifica se il wallet è stato caricato correttamente
+                active = self.backend.get_active_wallet()
+                if active.get("name") and active.get("loaded"):
+                    self._password = password
+                    print_green("✅ Password verificata")
+                    return True
+                
+                # Se arriva qui, la password è sbagliata
+                attempts += 1
+                remaining = max_attempts - attempts
+                print_red(f"❌ Password errata. Tentativi rimasti: {remaining}")
+                
+                if remaining == 0:
+                    print_red("❌ Troppi tentativi falliti.")
                     return False
-                json_str = decrypt_wallet(content, self._wallet_password)
-                wallet_data = json.loads(json_str)
-            else:
-                # Se non è cifrato, lo cifra subito
-                with open(source, 'r') as f:
-                    data = json.load(f)
-                encrypted = encrypt_wallet(json.dumps(data, indent=2, default=str), self._wallet_password)
-                with open(source, 'w') as f:
-                    f.write(encrypted)
-                wallet_data = data
-            
-            manager = self.wallet._xrp_manager
-            
-            saved_network = wallet_data.get("network", "testnet")
-            saved_crypto = wallet_data.get("crypto_type", "XRP")
-            
-            manager.seed_type = wallet_data.get("seed_type")
-            manager.seed_phrase = wallet_data.get("seed_phrase")
-            manager.seed_numbers = wallet_data.get("seed_numbers")
-            manager.passphrase = wallet_data.get("passphrase", "")
-            manager.base_seed_xrp = wallet_data.get("base_seed_xrp")
-            manager.base_seed_stellar = wallet_data.get("base_seed_stellar")
-            manager._correct_address = wallet_data.get("current_address")
-            manager.crypto_type = saved_crypto
-            manager.network = saved_network
-            
-            base_private_hex = wallet_data.get("base_private")
-            if base_private_hex:
-                manager.base_private = bytes.fromhex(base_private_hex)
-            
-            manager._derived_wallets = {}
-            for w_data in wallet_data.get("derived_wallets", []):
-                try:
-                    from wallet_manager import WalletInfo
-                    info = WalletInfo.from_dict(w_data)
-                    manager._derived_wallets[f"{info.keyword}:{info.index}"] = info
-                except:
-                    pass
-            
-            self._set_active_wallet_name(name)
-            
-            print_green(f"✅ Switched to wallet: {name}")
-            print_yellow(f"🌐 Network: {saved_network.upper()}")
-            print_yellow(f"🪙 Crypto: {saved_crypto}")
-            return True
-            
-        except Exception as e:
-            print_red(f"❌ Error switching wallet: {e}")
-            return False
-
-    def _get_wallet_network(self) -> str:
-        active = self._get_active_wallet_name()
-        if active:
-            wallet_file = self.wallets_dir / f"{active}.json"
-            if wallet_file.exists():
-                try:
-                    with open(wallet_file) as f:
-                        data = json.load(f)
-                        return data.get("network", "testnet")
-                except:
-                    pass
-        return "testnet"
-    
-    def _ensure_correct_network(self):
-        if not self.wallet or not self.wallet._xrp_manager:
-            return
-        
-        manager = self.wallet._xrp_manager
-        active = self._get_active_wallet_name()
-        
-        if active:
-            wallet_file = self.wallets_dir / f"{active}.json"
-            if wallet_file.exists():
-                try:
-                    with open(wallet_file) as f:
-                        data = json.load(f)
-                        saved_network = data.get("network", "testnet")
-                        saved_crypto = data.get("crypto_type", "XRP")
-                        
-                        if saved_network != manager.network:
-                            manager.set_network(saved_network)
-                            print_yellow(f"🌐 Rete impostata a: {saved_network.upper()}")
-                        
-                        if saved_crypto != manager.crypto_type:
-                            manager.set_crypto(saved_crypto)
-                            print_yellow(f"🪙 Crypto impostata a: {saved_crypto}")
-                except:
-                    pass
-    def _encrypt_data(self, data: Dict[str, Any]) -> str:
-        """Cifra dati JSON con password"""
-        from core_wrapper import encrypt_wallet
-        
-        if not self._wallet_password:
-            raise ValueError("Password required for encryption")
-        
-        json_str = json.dumps(data, indent=2, default=str)
-        return encrypt_wallet(json_str, self._wallet_password)
-    
-    def _decrypt_data(self, content: str) -> Optional[Dict[str, Any]]:
-        """Decifra dati JSON con password"""
-        from core_wrapper import decrypt_wallet, is_encrypted_wallet
-        
-        if not content:
-            return None
-        
-        if not self._wallet_password:
-            raise ValueError("Password required for decryption")
-        
-        if is_encrypted_wallet(content):
-            json_str = decrypt_wallet(content, self._wallet_password)
-            return json.loads(json_str)
         else:
-            return json.loads(content)
-
-    def cmd_remove_wallet(self):
-        """Rimuovi un wallet dalla lista"""
-        wallets = self._get_wallet_list()
-        if not wallets:
-            print_red("❌ Nessun wallet salvato.")
+            print("   🔑 Nessun wallet cifrato trovato.")
+            print("   Crea una nuova password per proteggere i tuoi wallet.")
+            print("")
+            while True:
+                password = getpass.getpass("🔐 Nuova password: ")
+                if not password:
+                    print_red("❌ La password non può essere vuota")
+                    continue
+                confirm = getpass.getpass("   Conferma password: ")
+                if confirm == password:
+                    break
+                print_red("❌ Le password non corrispondono")
+            
+            self._password = password
+            self.backend = create_backend(password)
+            self.backend.init()
+            print_green("✅ Password creata")
+            return True
+        
+        return False
+    
+    # ============================================================
+    # MAIN LOOP
+    # ============================================================
+    
+    def run(self):
+        """Avvia il loop principale"""
+        if not self._unlock():
+            print_red("❌ Impossibile avviare PAX Wallet")
             return
         
-        active = self._get_active_wallet_name()
+        print_bold("\n" + "=" * 60)
+        print_bold("    💰 PAX WALLET")
+        print_bold("=" * 60)
+        print("")
+        print_green("🔐 Wallet cifrato con AES-256-GCM")
+        print_green(f"📡 Reticulum: {'Attivo' if self.backend.reticulum else 'Non disponibile'}")
+        
+        while self._running:
+            try:
+                self._show_main_menu()
+                choice = input("\nScelta: ").strip()
+                self._handle_main_choice(choice)
+            except KeyboardInterrupt:
+                print("\n")
+                print_yellow("⚠️ Interrotto")
+                break
+            except Exception as e:
+                print_red(f"❌ Errore: {e}")
+        
+        self._cleanup()
+        print_green("👋 Arrivederci!")
+    
+    def _cleanup(self):
+        """Pulisce alla chiusura"""
+        if self.backend and self.backend.reticulum:
+            try:
+                if self.backend.metrics:
+                    self.backend.metrics.stop_query_loop()
+            except:
+                pass
+            try:
+                status = self.backend.reticulum.get_status()
+                if status.get('is_gateway', False):
+                    self.backend.reticulum.stop_gateway()
+            except:
+                pass
+    
+    # ============================================================
+    # MENU
+    # ============================================================
+    
+    def _show_main_menu(self):
+        """Mostra il menu principale"""
+        active = self.backend.get_active_wallet() if self.backend else {}
+        status = self.backend.get_status() if self.backend else {}
+        
+        print("\n" + "-" * 40)
+        print("  1) Wallet")
+        print("  2) Mostra saldo")
+        print("  3) Mostra indirizzo")
+        print("  4) Deriva indirizzi")
+        print("  5) Invia pagamento")
+        print("  6) Info wallet")
+        print("  7) Storico")
+        print("  8) Fund testnet (XLM)")
+        print("  9) Esporta")
+        print(" 10) Trustline")
+        print(" 11) Invia token")
+        print(" 12) Reticulum")
+        print(" 13) Cambia password")
+        print("  0) Esci")
+        
+        if active.get("name"):
+            print_yellow(f"  📂 Wallet: {active['name']} ({active['network'].upper()} - {active['crypto']})")
+        else:
+            print_red("  📂 Nessun wallet caricato")
+        
+        if status.get('gateway_active'):
+            print_yellow("  📡 Gateway attivo")
+        print("-" * 40)
+    
+    def _handle_main_choice(self, choice: str):
+        """Gestisce le scelte del menu principale"""
+        if choice == '0':
+            self._running = False
+        elif choice == '1':
+            self._menu_wallet()
+        elif choice == '2':
+            self._cmd_balance()
+        elif choice == '3':
+            self._cmd_address()
+        elif choice == '4':
+            self._cmd_derive()
+        elif choice == '5':
+            self._cmd_send()
+        elif choice == '6':
+            self._cmd_info()
+        elif choice == '7':
+            self._cmd_history()
+        elif choice == '8':
+            self._cmd_fund_testnet()
+        elif choice == '9':
+            self._cmd_export()
+        elif choice == '10':
+            self._menu_trustline()
+        elif choice == '11':
+            self._cmd_send_token()
+        elif choice == '12':
+            self._menu_reticulum()
+        elif choice == '13':
+            self._cmd_change_password()
+        else:
+            print_red("❌ Scelta non valida")
+    
+    # ============================================================
+    # SOTTOMENU WALLET
+    # ============================================================
+    
+    def _menu_wallet(self):
+        """Sottomenu gestione wallet"""
+        while True:
+            active = self.backend.get_active_wallet()
+            wallets = self.backend.list_wallets()
+            
+            print("\n" + "=" * 50)
+            print("  📂 WALLET")
+            print("=" * 50)
+            print(f"  Wallet attivo: {active.get('name') or 'NESSUNO'}")
+            print("\n  📋 Lista wallet:")
+            if wallets:
+                for i, w in enumerate(wallets, 1):
+                    marker = "▶" if w.get("is_active") else " "
+                    address = w.get("address", "unknown")
+                    # 🔥 NON TRONCARE! Mostra l'indirizzo COMPLETO
+                    print(f"    {i}. {marker} {w['name']:<15} ({w['crypto']} - {w['network']}) {address}")
+            else:
+                print("    ❌ Nessun wallet salvato")
+            
+            print("\n" + "-" * 50)
+            print("  1) Crea wallet")
+            print("  2) Importa wallet")
+            print("  3) Rimuovi wallet")
+            print("  4) Cambia wallet")
+            print("  0) Torna al menu principale")
+            print("-" * 50)
+            
+            sub = input("\nScelta: ").strip()
+            
+            if sub == '0':
+                break
+            elif sub == '1':
+                self._cmd_create()
+            elif sub == '2':
+                self._cmd_import()
+            elif sub == '3':
+                self._cmd_remove()
+            elif sub == '4':
+                self._cmd_switch()
+            else:
+                print_red("❌ Scelta non valida")
+    
+    # ============================================================
+    # COMANDI WALLET
+    # ============================================================
+    
+    def _cmd_create(self):
+        """Crea un nuovo wallet con supporto per strength e passphrase"""
+        name = input("Nome (default): ").strip() or "default"
+        crypto = input("Crypto (XRP/XLM): ").strip().upper() or "XRP"
+        network = input("Rete (testnet/mainnet): ").strip().lower() or "testnet"
+        
+        print("\n   🔐 Scegli il numero di parole:")
+        print("      1) 12 parole (standard)")
+        print("      2) 24 parole (massima sicurezza)")
+        choice = input("   Scelta (1 o 2, default 2): ").strip()
+        strength = 128 if choice == "1" else 256
+        
+        print("\n   🔐 Passphrase (opzionale, Invio per saltare):")
+        print("      Se la dimentichi, il wallet è irrecuperabile.")
+        passphrase = getpass.getpass("   Passphrase: ").strip()
+        if passphrase:
+            confirm = getpass.getpass("   Conferma passphrase: ").strip()
+            if confirm != passphrase:
+                print_red("❌ Le passphrase non corrispondono!")
+                return
+            print_cyan(f"   🔐 Passphrase impostata")
+        else:
+            print_yellow("   ⚠️ Nessuna passphrase")
+        
+        # 🔥 PASSA strength E passphrase AL BACKEND
+        result = self.backend.create_wallet(name, crypto, network, strength=strength, passphrase=passphrase)
+        
+        if result.get("success"):
+            print_green(f"\n✅ Wallet creato su {network.upper()}!")
+            print(f"   Address: {result.get('address', 'N/A')}")
+            print(f"   Mnemonic: {result.get('mnemonic', 'N/A')}")
+            print(f"   Word Count: {result.get('word_count', 0)}")
+            if passphrase:
+                print(f"   Passphrase: {'*' * len(passphrase)}")
+                print_yellow("\n   ⚠️ ATTENZIONE: La passphrase NON è memorizzata nel wallet!")
+                print_yellow("   Conservala in un luogo sicuro, SEPARATO dal seed.")
+                print_yellow("   Senza la passphrase NON puoi recuperare il wallet.")
+            print(f"   Seed: {result.get('seed', 'N/A')}")
+        else:
+            print_red(f"❌ Errore: {result.get('error', 'Unknown error')}")
+    
+    def _cmd_import(self):
+        """Importa un wallet con supporto per passphrase"""
+        seed = input("Inserisci seed/mnemonic/numeri: ").strip()
+        if not seed:
+            return
+        
+        # 🔥 RILEVA SE È UNA MNEMONICA
+        words = seed.strip().split()
+        is_mnemonic = len(words) in [12, 24] and all(w.isalpha() for w in words)
+        
+        passphrase = ""
+        if is_mnemonic:
+            print("\n   🔐 Passphrase (opzionale, Invio per saltare):")
+            print("      Inserisci la passphrase se il wallet è stato creato con una.")
+            passphrase = getpass.getpass("   Passphrase: ").strip()
+            if passphrase:
+                print_cyan(f"   🔐 Passphrase usata")
+            else:
+                print_yellow("   ⚠️ Nessuna passphrase")
+        
+        name = input("Nome (imported): ").strip() or "imported"
+        crypto = input("Crypto (auto/XRP/XLM): ").strip().upper() or "auto"
+        network = input("Rete (testnet/mainnet): ").strip().lower() or "testnet"
+        
+        # 🔥 PASSA LA PASSPHRASE AL BACKEND
+        result = self.backend.import_wallet(seed, name, crypto, network, passphrase=passphrase)
+        if result.get("success"):
+            print_green(f"\n✅ Wallet importato!")
+            print(f"   Address: {result.get('address', 'N/A')}")
+            print(f"   Type: {result.get('seed_type', 'N/A')}")
+            if passphrase:
+                print(f"   Passphrase: {'*' * len(passphrase)}")
+        else:
+            print_red(f"❌ Errore: {result.get('error', 'Unknown error')}")
+    
+    def _cmd_remove(self):
+        """Rimuove un wallet"""
+        wallets = self.backend.list_wallets()
+        if not wallets:
+            print_red("❌ Nessun wallet salvato")
+            return
         
         print("\n🗑️  RIMUOVI WALLET")
-        print("=" * 60)
-        print(f"{'#':<4} {'Nome':<18} {'Crypto':<6} {'Rete':<8}")
-        print("-" * 60)
-        
         for i, w in enumerate(wallets, 1):
-            marker = "▶" if w["name"] == active else " "
-            print(f"{i:<4} {marker} {w['name']:<17} {w.get('crypto', 'XRP'):<6} {w.get('network', 'testnet'):<8}")
+            marker = "▶" if w.get("is_active") else " "
+            print(f"  {i}. {marker} {w['name']} ({w['crypto']} - {w['network']})")
         
-        print("-" * 60)
-        print("=" * 60)
-        
-        choice = input("\nNumero wallet da rimuovere (o Invio per saltare): ").strip()
-        if not choice:
+        choice = input("\nNumero wallet da rimuovere (o Invio): ").strip()
+        if not choice or not choice.isdigit():
             return
         
-        if choice.isdigit():
-            idx = int(choice) - 1
-            if 0 <= idx < len(wallets):
-                wallet_name = wallets[idx]["name"]
-                if wallet_name == active:
-                    print_red(f"❌ Non puoi rimuovere il wallet attivo: {wallet_name}")
-                    return
-                confirm = input(f"   Rimuovere wallet '{wallet_name}'? (s/N): ").strip().lower()
-                if confirm == 's':
-                    wallet_file = self.wallets_dir / f"{wallet_name}.json"
-                    if wallet_file.exists():
-                        wallet_file.unlink()
-                        print_green(f"✅ Wallet '{wallet_name}' rimosso!")
-                    else:
-                        print_yellow(f"⚠️ File non trovato: {wallet_file}")
+        idx = int(choice) - 1
+        if 0 <= idx < len(wallets):
+            name = wallets[idx]["name"]
+            if wallets[idx].get("is_active"):
+                print_red("❌ Non puoi rimuovere il wallet attivo")
+                return
+            confirm = input(f"   Rimuovere '{name}'? (s/N): ").strip().lower()
+            if confirm == 's':
+                result = self.backend.remove_wallet(name)
+                if result.get("success"):
+                    print_green(f"✅ {result.get('message', '')}")
                 else:
-                    print_yellow("❌ Rimozione annullata")
+                    print_red(f"❌ {result.get('message', 'Errore')}")
+    
+    def _cmd_switch(self):
+        """Cambia wallet attivo"""
+        wallets = self.backend.list_wallets()
+        if not wallets:
+            print_red("❌ Nessun wallet salvato")
+            return
+        
+        print("\n🔄 CAMBIA WALLET")
+        for i, w in enumerate(wallets, 1):
+            marker = "▶" if w.get("is_active") else " "
+            address = w.get("address", "unknown")
+            # 🔥 INDIRIZZO COMPLETO
+            print(f"  {i}. {marker} {w['name']} ({w['crypto']} - {w['network']}) {address}")
+        
+        choice = input("\nNumero wallet (o Invio): ").strip()
+        if not choice or not choice.isdigit():
+            return
+        
+        idx = int(choice) - 1
+        if 0 <= idx < len(wallets):
+            name = wallets[idx]["name"]
+            result = self.backend.switch_wallet(name)
+            if result.get("success"):
+                print_green(f"✅ Wallet cambiato a: {name}")
+                print_yellow(f"   Rete: {result.get('network', 'testnet').upper()} | Crypto: {result.get('crypto', 'XRP')}")
             else:
-                print_red("❌ Numero non valido")
-        else:
-            print_yellow("❌ Inserisci un numero valido")
-
+                print_red(f"❌ {result.get('message', 'Errore')}")
+    
     # ============================================================
-    # PARSE TX DATE - DAL VECCHIO CODICE
+    # COMANDI PRINCIPALI
     # ============================================================
     
-    def _parse_tx_date(self, tx: Dict, tx_data: Dict) -> str:
-        from datetime import datetime
+    def _cmd_balance(self):
+        """Mostra saldo"""
+        result = self.backend.get_balance()
+        if result.get("success"):
+            print_green(f"💰 Saldo: {result.get('balance', 0):.6f} {result.get('crypto', 'XRP')}")
+        else:
+            print_red(f"❌ {result.get('message', 'Errore')}")
+    
+    def _cmd_address(self):
+        """Mostra indirizzo"""
+        result = self.backend.get_address()
+        if result.get("success"):
+            print_green(f"📤 Address: {result.get('address', 'N/A')}")
+        else:
+            print_red(f"❌ {result.get('message', 'Errore')}")
+    
+    def _cmd_derive(self):
+        """Deriva indirizzi - FORMATTATO IN TABELLA"""
+        keyword = input("Keyword (default): ").strip() or "default"
+        count = int(input("Numero (5): ").strip() or "5")
         
-        date_str = ""
+        result = self.backend.derive_addresses(keyword, count)
+        
+        if not result.get("success"):
+            print_red(f"❌ {result.get('message', 'Errore')}")
+            return
+        
+        addresses = result.get("addresses", [])
+        
+        if not addresses:
+            print_yellow("❌ Nessun indirizzo derivato.")
+            return
+        
+        print_bold(f"\n📤 INDIRIZZI DERIVATI ({keyword}: 0-{len(addresses)-1})")
+        print("=" * 120)
+        
+        # Intestazione tabella
+        print(f"{'#':<6} {'Indirizzo':<40} {'Private Key':<35} {'Public Key'}")
+        print("-" * 120)
+        
+        for addr in addresses:
+            idx = addr.get("index", 0)
+            address = addr.get("address", "N/A")
+            priv = addr.get("private_key", "")
+            pub = addr.get("public_key", "")
+            
+            # Tronca le chiavi se troppo lunghe
+            priv_display = priv[:30] + "..." if len(priv) > 33 else priv
+            pub_display = pub[:30] + "..." if len(pub) > 33 else pub
+            
+            print(f"{idx:<6} {address:<40} {priv_display:<35} {pub_display}")
+        
+        print("-" * 120)
+        print(f"Totale: {len(addresses)} indirizzi derivati")
+        print("=" * 120)
+    
+    def _cmd_send(self):
+        """Invia pagamento"""
+        to_addr = input("Indirizzo destinatario: ").strip()
+        if not to_addr:
+            return
         try:
-            if "date" in tx:
-                ledger_time = tx.get("date", 0)
-                if ledger_time:
-                    date_obj = datetime.fromtimestamp(ledger_time + 946684800)
-                    date_str = date_obj.strftime("%Y-%m-%d %H:%M:%S")
-        except:
-            pass
+            amount = float(input("Ammontare: ").strip())
+        except ValueError:
+            print_red("❌ Ammontare non valido")
+            return
+        memo = input("Memo (opzionale): ").strip()
         
-        if not date_str and "close_time_iso" in tx_data:
-            try:
-                close_time = tx_data.get("close_time_iso", "")
-                if close_time:
-                    date_str = close_time.replace("T", " ").replace("Z", "")[:19]
-            except:
-                pass
-        
-        return date_str
-    
-    # ============================================================
-    # FORMAT TIME AGO - PER TEMPI RELATIVI
-    # ============================================================
-    
-    def _format_time_ago(self, timestamp: int) -> str:
-        """Formatta il timestamp in 'X minuti fa', 'X ore fa', ecc."""
-        if not timestamp:
-            return "Mai"
-        
-        now = int(time.time())
-        diff = now - timestamp
-        
-        if diff < 60:
-            return "Poco fa"
-        elif diff < 3600:
-            mins = diff // 60
-            return f"{mins} min fa" if mins > 1 else "1 min fa"
-        elif diff < 86400:
-            hours = diff // 3600
-            return f"{hours} ore fa" if hours > 1 else "1 ora fa"
-        elif diff < 604800:
-            days = diff // 86400
-            return f"{days} giorni fa" if days > 1 else "1 giorno fa"
+        result = self.backend.send_payment(to_addr, amount, memo)
+        if result.get("success"):
+            print_green(f"✅ Pagamento inviato!")
+            print(f"   Hash: {result.get('tx_hash', 'N/A')}")
         else:
-            weeks = diff // 604800
-            return f"{weeks} sett fa" if weeks > 1 else "1 sett fa"
+            print_red(f"❌ {result.get('message', 'Errore')}")
     
-    # ============================================================
-    # PRINT TRANSACTIONS - DAL VECCHIO CODICE
-    # ============================================================
+    def _cmd_info(self):
+        """Info wallet"""
+        result = self.backend.get_wallet_info()
+        if result.get("success"):
+            print_bold("\n📊 INFO COMPLETA WALLET")
+            print("=" * 60)
+            print(f"   Crypto: {result.get('crypto', 'N/A')}")
+            print(f"   Network: {result.get('network', 'N/A').upper()}")
+            print(f"   Address: {result.get('address', 'N/A')}")
+            print(f"   Seed Type: {result.get('seed_type', 'N/A')}")
+            if result.get('balance') is not None:
+                print(f"   Balance: {result.get('balance', 0):.6f} {result.get('crypto', 'XRP')}")
+            if result.get('mnemonic'):
+                print(f"\n   Mnemonic: {result.get('mnemonic')}")
+                print(f"   Word Count: {len(result.get('mnemonic', '').split())}")
+            if result.get('secret_numbers'):
+                print(f"\n   Secret Numbers: {result.get('secret_numbers')}")
+            if result.get('xrp_seed'):
+                print(f"\n   XRP Seed: {result.get('xrp_seed')}")
+            if result.get('stellar_seed'):
+                print(f"\n   Stellar Seed: {result.get('stellar_seed')}")
+            if result.get('private_key'):
+                print(f"\n   Private Key: {result.get('private_key')}")
+            if result.get('derived_wallets'):
+                print(f"\n   Derived Wallets: {len(result.get('derived_wallets', []))}")
+                for w in result.get('derived_wallets', [])[:5]:
+                    print(f"      - {w.get('address', 'N/A')} ({w.get('keyword', 'default')}:{w.get('index', 0)})")
+            print("=" * 60)
+        else:
+            print_red(f"❌ {result.get('message', 'Errore')}")
+    
+    def _cmd_history(self):
+        """Storico transazioni - FORMATTA E STAMPA"""
+        limit = int(input("Numero transazioni (10): ").strip() or "10")
+        result = self.backend.get_history(limit)
+        
+        if not result.get("success"):
+            print_red(f"❌ {result.get('message', 'Errore')}")
+            return
+        
+        transactions = result.get("transactions", [])
+        address = result.get("address", "")
+        
+        if not transactions:
+            print_yellow("❌ Nessuna transazione trovata.")
+            return
+        
+        # 🔥 FORMATTA E STAMPA (usa parse_tx_date importato)
+        self._print_transactions(transactions, address)
+        
+        # Mostra explorer
+        network = result.get("network", "mainnet")
+        if network == "mainnet":
+            explorer = f"https://xrpscan.com/account/{address}"
+        elif network == "testnet":
+            explorer = f"https://testnet.xrpl.org/accounts/{address}"
+        else:
+            explorer = f"https://devnet.xrpl.org/accounts/{address}"
+        print(f"\n🔗 Visualizza tutto: {explorer}")
     
     def _print_transactions(self, transactions: List, address: str) -> None:
-        from datetime import datetime
+        """Stampa transazioni in formato tabella - UI SOLO"""
         import base64
-        
-        manager = self.wallet._xrp_manager if self.wallet else None
+        from datetime import datetime
         
         print("\n┌────┬─────────────────────┬────────────┬──────────────────┬────────────┬──────────────────────────────────────────────────┬────────────────────┐")
         print(f"│ #  │ Data/Ora            │ Tipo       │ Importo          │ Fee        │ Da/A                                              │ Memo               │")
@@ -635,7 +576,7 @@ class WalletCLI:
                 continue
             
             tx_type = tx.get("TransactionType", "Unknown")
-            date_str = self._parse_tx_date(tx, tx_data)
+            date_str = parse_tx_date(tx, tx_data)  # <-- USA FUNZIONE GLOBALE
             
             fee_drops = tx.get("Fee", "0")
             try:
@@ -655,10 +596,17 @@ class WalletCLI:
                     token_value = amount.get('value', '0')
                     token_currency = amount.get('currency', '???')
                     
-                    if manager and len(token_currency) > 3:
-                        decoded = manager._decode_currency_hex(token_currency)
-                        if decoded and decoded != token_currency:
-                            token_currency = decoded
+                    # Decodifica currency se necessario
+                    if len(token_currency) > 3:
+                        try:
+                            bytes_data = bytes.fromhex(token_currency)
+                            while bytes_data and bytes_data[-1] == 0:
+                                bytes_data = bytes_data[:-1]
+                            decoded = bytes_data.decode('utf-8', errors='ignore').strip()
+                            if decoded and all(32 <= ord(c) <= 126 for c in decoded):
+                                token_currency = decoded
+                        except:
+                            pass
                     
                     try:
                         val_float = float(token_value)
@@ -733,1642 +681,439 @@ class WalletCLI:
         print("└────┴─────────────────────┴────────────┴──────────────────┴────────────┴──────────────────────────────────────────────────┴────────────────────┘")
         print(f"Totale: {len(transactions)} transazioni mostrate")
 
-    
-    def cmd_test_gateways(self):
-        """Testa tutti i gateway disponibili e mostra le performance"""
-        if not self.metrics:
-            print_red("❌ Metriche non disponibili")
-            return
-        
-        print_blue("🔍 Test di tutti i gateway in corso...")
-        
-        gateways = self.reticulum.discover_gateways()
-        
-        if not gateways:
-            print_red("❌ Nessun gateway trovato")
-            return
-        
-        print_bold(f"\n🧪 TEST GATEWAY ({len(gateways)})")
-        print("=" * 120)
-        print(f"{'#':<3} {'Nome':<16} {'Status':<10} {'RTT':<10} {'XRP':<12} {'Stellar':<12} {'Hops':<6} {'Score'}")
-        print("-" * 120)
-        
-        results = []
-        for idx, gw in enumerate(gateways, 1):
-            name = gw.get('name', 'UNKNOWN')[:14]
-            gw_id = gw.get('gateway_id', '')
-            hops = gw.get('hops', '?')
-            
-            # 🔥 USA request_gateway_info() INVECE DI send_ping()
-            start = time.time()
-            try:
-                success = self.metrics.request_gateway_info(gw_id)
-                rtt = (time.time() - start) * 1000
-                if success:
-                    status = "✅ Online"
-                    # Prendi i dati aggiornati
-                    peers = self.metrics.get_all_peers()
-                    for p in peers:
-                        if p.get('gateway_id') == gw_id:
-                            gw = p
-                            break
-                else:
-                    status = "❌ Offline"
-                    rtt = None
-            except Exception as e:
-                status = "❌ Offline"
-                rtt = None
-            
-            # Calcola score
-            score = 0
-            if rtt and status == "✅ Online":
-                score += max(0, 50 - rtt/10)
-            
-            xrp = "✅" if gw.get('xrp_reachable') else "❌"
-            stellar = "✅" if gw.get('stellar_reachable') else "❌"
-            
-            if gw.get('xrp_reachable'):
-                score += 10
-            if gw.get('stellar_reachable'):
-                score += 10
-            if gw.get('has_internet'):
-                score += 5
-            
-            rtt_str = f"{rtt:.1f}ms" if rtt else "Timeout"
-            
-            print(f"{idx:<3} {name:<16} {status:<10} {rtt_str:<10} {xrp:<12} {stellar:<12} {hops:<6} {score:.0f}")
-            results.append({"name": name, "status": status, "score": score, "gw_id": gw_id})
-        
-        print("=" * 120)
-        
-        # Miglior gateway
-        online = [r for r in results if r["status"] == "✅ Online"]
-        if online:
-            best = max(online, key=lambda x: x["score"])
-            print(f"\n🏆 Miglior gateway: {best['name']} (Score: {best['score']:.0f})")
-            print(f"   ID: {best['gw_id']}")
+    def _cmd_fund_testnet(self):
+        """Fund testnet"""
+        result = self.backend.fund_testnet()
+        if result.get("success"):
+            print_green(f"✅ {result.get('message', '')}")
         else:
-            print("\n❌ Nessun gateway online")
-
-
-
+            print_red(f"❌ {result.get('message', 'Errore')}")
+    
+    def _cmd_export(self):
+        """Esporta wallet"""
+        include_private = input("Includi chiave privata? (s/N): ").strip().lower() == 's'
+        result = self.backend.export_wallet(include_private)
+        if result.get("success"):
+            print(json.dumps(result.get("data", {}), indent=2, default=str))
+        else:
+            print_red(f"❌ {result.get('message', 'Errore')}")
+    
+    def _cmd_change_password(self):
+        """Cambia password"""
+        old = getpass.getpass("Password attuale: ")
+        if old != self._password:
+            print_red("❌ Password errata")
+            return
+        new = getpass.getpass("Nuova password: ")
+        confirm = getpass.getpass("Conferma password: ")
+        if new != confirm:
+            print_red("❌ Le password non corrispondono")
+            return
+        result = self.backend.change_password(old, new)
+        if result.get("success"):
+            self._password = new
+            print_green("✅ Password cambiata con successo!")
+        else:
+            print_red(f"❌ {result.get('message', 'Errore')}")
+    
     # ============================================================
-    # 4. COMANDI PRINCIPALI
+    # TRUSTLINE
     # ============================================================
     
-    def cmd_create(self, name: str = "default", crypto: str = "XRP", network: str = "testnet"):
-        if not self.wallet:
-            self.init(network)
-        
-        if not self._validate_wallet_name(name):
-            return None
-        
-        # ============================================================
-        # 🔥 CONTROLLA INPUT VUOTO - SE TUTTO VUOTO, NON CREARE
-        # ============================================================
-        if not name or name.strip() == "":
-            print_red("❌ Wallet name cannot be empty")
-            return None
-        
-        # ============================================================
-        # 🔥 VALIDA CRYPTO
-        # ============================================================
-        crypto = crypto.upper()
-        if crypto not in ["XRP", "XLM"]:
-            print_red(f"❌ Crypto non supportata: {crypto}")
-            print_yellow("   Usa XRP o XLM")
-            return None
-        
-        # ============================================================
-        # 🔥 VALIDA RETE
-        # ============================================================
-        network = network.lower()
-        if network not in ["testnet", "mainnet", "devnet"]:
-            print_red(f"❌ Rete non supportata: {network}")
-            print_yellow("   Usa: testnet, mainnet o devnet")
-            return None
-        
-        print_blue(f"📤 Creating {crypto} wallet on {network.upper()}...")
-        
-        manager = self.wallet._xrp_manager
-        if network != manager.network:
-            manager.set_network(network)
-            print_yellow(f"🌐 Network set to: {network.upper()}")
-        
-        # ============================================================
-        # 🔥 CHIEDE 12 O 24 PAROLE
-        # ============================================================
-        print("\n   🔐 Choose seed word count:")
-        print("      1) 12 words (128 bit - standard, easier to write)")
-        print("      2) 24 words (256 bit - maximum security)")
-        print("")
-        choice = input("   Choice (1 or 2, default 2): ").strip()
-        
-        if choice == "1":
-            strength = 128
-            word_count = 12
-            print_cyan("   🔐 Using 12 words")
-        else:
-            strength = 256
-            word_count = 24
-            print_cyan("   🔐 Using 24 words (maximum security)")
-        
-        # ============================================================
-        # 🔥 CHIEDE PASSPHRASE (OSCURATA) - SENZA y/N
-        # ============================================================
-        print("")
-        print("   🔐 Passphrase (optional, press Enter to skip):")
-        print("      If you forget it, the wallet is unrecoverable.")
-        print("")
-        
-        import getpass
-        passphrase = getpass.getpass("   Enter passphrase: ").strip()
-        
-        if passphrase:
-            confirm = getpass.getpass("   Confirm passphrase: ").strip()
-            if confirm != passphrase:
-                print_red("❌ Passphrases do not match!")
-                return None
-            print_cyan(f"   🔐 Passphrase set")
-        else:
-            print_yellow("   ⚠️ No passphrase")
-        
-        # ============================================================
-        # 🔥 CREA WALLET
-        # ============================================================
-        result = self.wallet.create_wallet(name, crypto, strength=strength, passphrase=passphrase)
-        
-        print_green(f"\n✅ Wallet created on {network.upper()}!")
-        print(f"   Identity: {result['identity_id']}")
-        print(f"   Address: {result['address']}")
-        print(f"   Mnemonic: {result['mnemonic']}")
-        print(f"   Word Count: {result['word_count']}")
-        if passphrase:
-            print(f"   Passphrase: {'*' * len(passphrase)}")
-        print(f"   Seed: {result.get('seed', 'N/A')}")
-        
-        if passphrase:
-            print("")
-            print_yellow("   ⚠️ WARNING: The passphrase is NOT stored in the wallet!")
-            print_yellow("   Store it in a safe place, SEPARATE from the seed.")
-            print_yellow("   Without the passphrase you CANNOT recover the wallet.")
-        
-        self.wallet.save()
-        self._save_wallet_as(name)
-        self._set_active_wallet_name(name)
-        
-        return result
-    
-    def cmd_import(self, seed_input: str, name: str = "imported", crypto: str = "auto", network: str = "testnet"):
-        if not self.wallet:
-            self.init(network)
-        
-        if not self._validate_wallet_name(name):
-            return None
-        
-        # ============================================================
-        # 🔥 VALIDA RETE
-        # ============================================================
-        network = network.lower()
-        if network not in ["testnet", "mainnet", "devnet"]:
-            print_red(f"❌ Rete non supportata: {network}")
-            print_yellow("   Usa: testnet, mainnet o devnet")
-            return None
-        
-        try:
-            print_blue(f"📥 Importazione wallet...")
+    def _menu_trustline(self):
+        """Sottomenu trustline"""
+        while True:
+            print("\n🔗 GESTIONE TRUSTLINE")
+            print("  1) Mostra trustline")
+            print("  2) Crea trustline")
+            print("  3) Rimuovi trustline")
+            print("  4) Info trustline")
+            print("  0) Torna al menu principale")
             
-            manager = self.wallet._xrp_manager
+            sub = input("\nScelta: ").strip()
             
-            if network != manager.network:
-                manager.set_network(network)
-                print_yellow(f"🌐 Rete impostata a: {network.upper()}")
-            
-            cleaned = seed_input
-            cleaned = re.sub(r'[A-Ha-h]:', '', cleaned)
-            cleaned = re.sub(r',', ' ', cleaned)
-            cleaned = re.sub(r'\s+', ' ', cleaned).strip()
-            numbers_parts = cleaned.split()
-            
-            import_type = manager.detect_input_type(seed_input)
-            print(f"   Tipo rilevato: {import_type}")
-            
-            crypto_param = None
-            if crypto and crypto.lower() != "auto":
-                crypto_param = crypto.upper()
-                # 🔥 VALIDA CRYPTO
-                if crypto_param not in ["XRP", "XLM"]:
-                    print_red(f"❌ Crypto non supportata: {crypto_param}")
-                    print_yellow("   Usa XRP, XLM o auto")
-                    return None
-            
-            # ============================================================
-            # 🔥 SE MNEMONICA, CHIEDI PASSPHRASE (OSCURATA)
-            # ============================================================
-            passphrase = ""
-            if import_type == "bip39":
-                print("")
-                print("   🔐 Passphrase (optional, press Enter to skip):")
-                print("      Enter the passphrase if the wallet was created with one.")
-                print("")
-                import getpass
-                passphrase = getpass.getpass("   Enter passphrase: ").strip()
-                if passphrase:
-                    print_cyan(f"   🔐 Passphrase used")
-                else:
-                    print_yellow("   ⚠️ No passphrase")
-            
-            # ============================================================
-            # 🔥 GESTISCI NUMERI XAMAN
-            # ============================================================
-            if len(numbers_parts) == 8 and all(p.isdigit() and len(p) == 6 for p in numbers_parts):
-                import_type = "numbers"
-                print_cyan(f"   🔢 Numeri Xaman rilevati: {numbers_parts}")
-                print_cyan("   🔄 Conversione numeri Xaman via Node.js...")
-                result = self.wallet.import_wallet(" ".join(numbers_parts), name, crypto_param)
+            if sub == '0':
+                break
+            elif sub == '1':
+                self._cmd_trustlines()
+            elif sub == '2':
+                self._cmd_trustline_create()
+            elif sub == '3':
+                self._cmd_trustline_remove()
+            elif sub == '4':
+                self._cmd_trustline_info()
             else:
-                result = self.wallet.import_wallet(seed_input, name, crypto_param, passphrase=passphrase)
-            
-            print_green(f"\n✅ Wallet importato!")
-            print(f"   Identity: {result['identity_id']}")
-            print(f"   Address: {result['address']}")
-            print(f"   Type: {result['seed_type']}")
-            
-            print(f"\n📊 DETTAGLI WALLET:")
-            print(f"   Crypto: {manager.crypto_type}")
-            print(f"   Network: {manager.network}")
-            
-            if manager.seed_phrase:
-                print(f"   Mnemonic: {manager.seed_phrase}")
-                print(f"   Word Count: {len(manager.seed_phrase.split())}")
-            
-            if passphrase:
-                print(f"   Passphrase: {'*' * len(passphrase)}")
-            
-            if manager.seed_numbers:
-                print(f"   Secret Numbers: {' '.join(manager.seed_numbers)}")
-            
-            if manager.base_seed_xrp:
-                print(f"   XRP Seed: {manager.base_seed_xrp}")
-            
-            if manager.base_seed_stellar:
-                print(f"   Stellar Seed: {manager.base_seed_stellar}")
-            
-            if manager.base_private:
-                print(f"   Private Key: {manager.base_private.hex()}")
-            
-            try:
-                balance = manager.get_balance()
-                print(f"   Saldo: {balance} {manager.crypto_type}")
-            except:
-                pass
-            
-            self.wallet.save()
-            self._save_wallet_as(name)
-            self._set_active_wallet_name(name)
-            
-            return result
-            
-        except Exception as e:
-            print_red(f"❌ Errore importazione: {e}")
-            import traceback
-            traceback.print_exc()
-            return None
+                print_red("❌ Scelta non valida")
     
-    def _cmd_balance_xlm(self, refresh: bool = False):
-        manager = self.wallet._xrp_manager
-        try:
-            balance = manager.get_balance(refresh)
-            print_green(f"   Saldo: {balance:.7f} XLM")
-            return balance
-        except Exception as e:
-            print_red(f"   ❌ Errore: {e}")
-            return None
-    
-    def cmd_balance(self, refresh: bool = False):
-        if not self.wallet:
-            self.init()
-        
-        if not self.wallet._xrp_manager.is_loaded():
-            print_red("❌ Nessun wallet caricato!")
-            return None
-        
-        self._ensure_correct_network()
-        manager = self.wallet._xrp_manager
-        
-        if manager.crypto_type == "XLM" and XLM_AVAILABLE:
-            return self._cmd_balance_xlm(refresh)
-        
-        print_blue(f"💰 Recupero saldo XRP su {manager.network.upper()}...")
-        
-        try:
-            balance = manager.get_balance(refresh)
-            print_green(f"   Saldo: {balance:.6f} XRP")
-            return balance
-        except Exception as e:
-            print_red(f"   ❌ Errore: {e}")
-            return None
-    
-    def cmd_address(self):
-        if not self.wallet:
-            self.init()
-        
-        if not self.wallet._xrp_manager.is_loaded():
-            print_red("❌ Nessun wallet caricato!")
-            return None
-        
-        address = self.wallet.get_address()
-        print_green(f"   Address: {address}")
-        return address
-    
-    def cmd_derive(self, keyword: str = "default", count: int = 5):
-        if not self.wallet:
-            self.init()
-        
-        if not self.wallet._xrp_manager.is_loaded():
-            print_red("❌ Nessun wallet caricato!")
-            return
-        
-        crypto_type = self.wallet._xrp_manager.crypto_type
-        
-        # 🔥 PER STELLAR: MOSTRA SOLO L'INDIRIZZO
-        if crypto_type == "XLM":
-            try:
-                address = self.wallet.get_address()
-                print_green(f"📤 Indirizzo Stellar: {address}")
-            except Exception as e:
-                print_red(f"❌ Errore: {e}")
-            return
-        
-        # PER XRP: derivazione multipla
-        print_blue(f"📤 Derivazione {count} indirizzi XRP (keyword: {keyword})...")
-        
-        try:
-            addresses = self.wallet.derive_addresses(keyword, count)
-            for i, addr in enumerate(addresses):
-                print(f"   {i}: {addr['address']}")
-        except ValueError as e:
-            print_red(f"❌ {e}")
-        
-        return addresses
-    
-    def cmd_info(self):
-        if not self.wallet:
-            self.init()
-        
-        manager = self.wallet._xrp_manager
-        
-        if not manager.is_loaded():
-            print_red("❌ Nessun wallet caricato!")
-            return
-        
-        info = manager.get_seed_info()
-        
-        print_bold("\n📊 INFO COMPLETA WALLET")
-        print("=" * 60)
-        print(f"   Crypto: {manager.crypto_type}")
-        print(f"   Network: {manager.network.upper()}")
-        print(f"   Address: {manager.get_address()}")
-        print(f"   Seed Type: {manager.seed_type}")
-        
-        if info.get('balance') is not None:
-            print(f"   Balance: {info['balance']:.6f} {manager.crypto_type}")
-        
-        if info.get('seed_phrase'):
-            print(f"\n   Mnemonic: {info['seed_phrase']}")
-            print(f"   Word Count: {info.get('word_count', 0)}")
-        
-        if info.get('secret_numbers'):
-            print(f"\n   Secret Numbers: {info.get('formatted')}")
-        
-        if info.get('seed_xrp'):
-            print(f"\n   XRP Seed: {info['seed_xrp']}")
-        
-        if info.get('private_key'):
-            print(f"\n   Private Key: {info['private_key']}")
-        elif manager.base_private:
-            print(f"\n   Private Key: {manager.base_private.hex()}")
-        elif manager.base_seed_xrp:
-            try:
-                from xrpl.core import keypairs
-                _, private_key = keypairs.derive_keypair(manager.base_seed_xrp)
-                print(f"\n   Private Key: {private_key}")
-            except:
-                pass
-        elif manager.base_seed_stellar:
-            print(f"\n   Private Key: {manager.base_seed_stellar}")
-        
-        derived = manager.list_derived()
-        if derived:
-            print(f"\n   Derived Wallets: {len(derived)}")
-            for w in derived[:5]:
-                print(f"      - {w.address} ({w.keyword}:{w.index})")
-        
-        print("=" * 60)
-    
-    # ============================================================
-    # HISTORY - COPIA DAL VECCHIO CODICE
-    # ============================================================
-    
-    def cmd_history(self, limit: int = 10):
-        if not self.wallet:
-            self.init()
-        
-        if not self.wallet._xrp_manager.is_loaded():
-            print_red("❌ Nessun wallet caricato!")
-            return None
-        
-        self._ensure_correct_network()
-        manager = self.wallet._xrp_manager
-        
-        if manager.crypto_type == "XLM" and XLM_AVAILABLE:
-            history_xlm(self, ["--limit", str(limit)])
-            return
-        
-        address = manager.get_address()
-        network = manager.network
-        
-        print(f"\n📜 STORICO TRANSAZIONI XRP ({network.upper()})")
-        print("=" * 80)
-        print(f"Indirizzo: {address}")
-        print(f"Limite:    {limit} transazioni")
-        print("=" * 80)
-        
-        try:
-            from xrpl.models.requests import AccountTx
-            from xrpl.models.response import ResponseStatus
-            from xrpl.clients import JsonRpcClient
-            
-            urls = {
-                "mainnet": "https://s1.ripple.com:51234/",
-                "testnet": "https://s.altnet.rippletest.net:51234/",
-                "devnet": "https://s.devnet.rippletest.net:51234/"
-            }
-            client = JsonRpcClient(urls.get(network, urls["testnet"]))
-            
-            request = AccountTx(
-                account=address,
-                ledger_index_min=-1,
-                ledger_index_max=-1,
-                limit=limit,
-                forward=False
-            )
-            
-            print("🔄 Richiesta al ledger...")
-            response = client.request(request)
-            
-            if response.status != ResponseStatus.SUCCESS:
-                print(f"❌ Errore: {response.status}")
+    def _cmd_trustlines(self):
+        """Mostra trustline - FORMATTATO COME LE ALTRE TABELLE"""
+        result = self.backend.get_trustlines()
+        if result.get("success"):
+            trustlines = result.get("trustlines", [])
+            if not trustlines:
+                print_yellow("❌ Nessuna trustline trovata")
                 return
             
-            result = response.result
-            transactions = result.get("transactions", [])
+            # 🔥 DETERMINA IL NETWORK
+            network = "MAINNET" if self.backend.wallet._xrp_manager.network == "mainnet" else "TESTNET"
+            crypto = self.backend.wallet._xrp_manager.crypto_type
             
-            if not transactions:
-                print("❌ Nessuna transazione trovata.")
-                return
+            print_bold(f"\n🔗 TRUSTLINES ({crypto}) su {network}")
+            print("=" * 100)
+            print(f"{'#':<4} {'Asset':<12} {'Issuer':<36} {'Balance':<16} {'Limit':<14} {'Status'}")
+            print("-" * 100)
             
-            self._print_transactions(transactions, address)
-            
-            if network == "mainnet":
-                explorer = f"https://xrpscan.com/account/{address}"
-            elif network == "testnet":
-                explorer = f"https://testnet.xrpl.org/accounts/{address}"
-            else:
-                explorer = f"https://devnet.xrpl.org/accounts/{address}"
-            print(f"\n🔗 Visualizza tutto: {explorer}")
-            
-        except Exception as e:
-            print_red(f"   ❌ Errore: {e}")
-            if network == "mainnet":
-                explorer = f"https://xrpscan.com/account/{address}"
-            elif network == "testnet":
-                explorer = f"https://testnet.xrpl.org/accounts/{address}"
-            else:
-                explorer = f"https://devnet.xrpl.org/accounts/{address}"
-            print(f"\n🔗 Visualizza su: {explorer}")
-    
-    # ============================================================
-    # 4. COMANDI PRINCIPALI 
-    # ============================================================
-
-    def cmd_send(self, to_address: str, amount: float, memo: str = ""):
-        """Invia pagamento XRP o XLM con conferma"""
-        if not self.wallet:
-            self.init()
-        
-        if not self.wallet._xrp_manager.is_loaded():
-            print_red("❌ Nessun wallet caricato!")
-            return None
-        
-        self._ensure_correct_network()
-        manager = self.wallet._xrp_manager
-        
-        # Gestione XLM
-        if manager.crypto_type == "XLM" and XLM_AVAILABLE:
-            return self._send_xlm(to_address, amount, memo)
-        
-        # Gestione XRP
-        return self._send_xrp(to_address, amount, memo)
-
-    def _send_xlm(self, to_address: str, amount: float, memo: str = ""):
-        """Invia XLM con riepilogo e conferma"""
-        # Mostra riepilogo
-        if not self._confirm_transaction("XLM", to_address, amount, memo):
-            return None
-        
-        print_blue("📡 Invio in corso...")
-        
-        args = [to_address, str(amount)]
-        if memo:
-            args.append(memo)
-        
-        send_xlm(self, args)
-        return True
-
-    def _send_xrp(self, to_address: str, amount: float, memo: str = ""):
-        """Invia XRP con riepilogo e conferma"""
-        # Mostra riepilogo
-        if not self._confirm_transaction("XRP", to_address, amount, memo):
-            return None
-        
-        print_blue("📡 Invio in corso...")
-        
-        try:
-            from xrpl.account import get_balance
-            from xrpl.models.transactions import Payment
-            from xrpl.transaction import autofill, sign, submit_and_wait
-            from xrpl.clients import JsonRpcClient
-            from xrpl.wallet import Wallet
-            from xrpl.models.transactions import Memo
-            
-            manager = self.wallet._xrp_manager
-            
-            urls = {
-                "mainnet": "https://s1.ripple.com:51234/",
-                "testnet": "https://s.altnet.rippletest.net:51234/",
-                "devnet": "https://s.devnet.rippletest.net:51234/"
-            }
-            client = JsonRpcClient(urls.get(manager.network, urls["testnet"]))
-            
-            wallet = manager.get_wallet("default", 0)
-            source_address = wallet.classic_address
-            
-            # Controlla saldo
-            balance_drops = get_balance(source_address, client)
-            balance_xrp = balance_drops / 1_000_000
-            
-            if balance_xrp < amount:
-                print_red(f"   ❌ Saldo insufficiente! Hai: {balance_xrp:.6f} XRP")
-                return None
-            
-            amount_drops = str(int(amount * 1_000_000))
-            
-            payment_params = {
-                "account": source_address,
-                "amount": amount_drops,
-                "destination": to_address,
-            }
-            
-            # Aggiungi memo se presente
-            if memo:
-                memo_hex = self._encode_memo_hex(memo)
-                payment_params["memos"] = [Memo(memo_data=memo_hex)]
-            
-            payment = Payment(**payment_params)
-            tx = autofill(payment, client)
-            signed_tx = sign(tx, wallet)
-            response = submit_and_wait(signed_tx, client)
-            
-            tx_hash = response.result.get("hash", "unknown")
-            
-            print_green(f"   ✅ Pagamento inviato!")
-            print(f"   Hash: {tx_hash}")
-            
-            new_balance = get_balance(source_address, client) / 1_000_000
-            print(f"   Nuovo saldo: {new_balance:.6f} XRP")
-            
-            return tx_hash
-            
-        except Exception as e:
-            print_red(f"   ❌ Errore: {e}")
-            return None
-
-    def _confirm_transaction(self, crypto: str, to_address: str, amount: float, memo: str = "") -> bool:
-        """Mostra il riepilogo e chiede conferma"""
-        manager = self.wallet._xrp_manager
-        
-        print_bold(f"\n📤 INVIO {crypto}")
-        print("=" * 60)
-        print(f"   Wallet:    {self._get_active_wallet_name()}")
-        print(f"   Da:        {manager.get_address()}")
-        print(f"   A:         {to_address}")
-        print(f"   Importo:   {amount} {crypto}")
-        if memo:
-            print(f"   📝 Memo:    {memo}")
-        print("=" * 60)
-        print("")
-        
-        confirm = input("   Confermi l'invio? (s/n): ")
-        if confirm.lower() != 's':
-            print_red("❌ Transazione annullata.")
-            return False
-        
-        return True
-
-    def _encode_memo_hex(self, memo: str) -> str:
-        """Codifica il memo in hex"""
-        memo_hex = memo.encode('utf-8').hex()
-        if len(memo_hex) % 2 != 0:
-            memo_hex = '0' + memo_hex
-        if len(memo_hex) > 2048:
-            memo_hex = memo_hex[:2048]
-        return memo_hex
-    
-    def cmd_fund_testnet(self):
-        if not self.wallet:
-            self.init()
-        
-        if not self.wallet._xrp_manager.is_loaded():
-            print_red("❌ Nessun wallet caricato!")
-            return None
-        
-        manager = self.wallet._xrp_manager
-        
-        if manager.crypto_type == "XLM" and XLM_AVAILABLE:
-            faucet_xlm(self)
-            return
-        
-        print_blue("💰 Fonding testnet...")
-        print_yellow("   ⚠️ Il faucet XRP richiede un wallet apposito.")
-        print_yellow("   Usa: python3 wallet_cli.py faucet")
-        return False
-    
-    def cmd_export(self, include_private: bool = False):
-        if not self.wallet:
-            self.init()
-        
-        if not self.wallet._xrp_manager.is_loaded():
-            print_red("❌ Nessun wallet caricato!")
-            return None
-        
-        print_blue("📤 Esportazione wallet...")
-        data = self.wallet._xrp_manager.export_wallet("dict", include_private)
-        
-        if include_private:
-            print_yellow("   ⚠️ ATTENZIONE: Chiave privata inclusa!")
-        
-        print(json.dumps(data, indent=2, default=str))
-        return data
-    
-    def cmd_list_wallets(self):
-        wallets = self._get_wallet_list()
-        if not wallets:
-            print_red("❌ Nessun wallet salvato.")
-            return
-        
-        active = self._get_active_wallet_name()
-        
-        print("\n📂 WALLET SALVATI")
-        print("=" * 100)
-        print(f"{'#':<4} {'Nome':<18} {'Crypto':<6} {'Rete':<8} {'Indirizzo':<42}")
-        print("-" * 100)
-        
-        for i, w in enumerate(wallets, 1):
-            marker = "▶" if w["name"] == active else " "
-            crypto = w.get("crypto", "XRP")
-            network = w.get("network", "testnet")
-            address = w.get("address", "unknown")
-            print(f"{i:<4} {marker} {w['name']:<17} {crypto:<6} {network:<8} {address:<42}")
-        
-        print("-" * 100)
-        print(f"Totale: {len(wallets)} wallet")
-        if active:
-            print(f"▶ Attivo: {active}")
-        print("=" * 100)
-        
-        # 🔥 CHIEDE SE MOSTRARE I DETTAGLI DI UN WALLET
-        print("\n📋 Vuoi vedere i dettagli di un wallet?")
-        print("   (premi Invio per saltare)")
-        choice = input("Numero wallet (o Invio): ").strip()
-        
-        if choice.isdigit():
-            idx = int(choice) - 1
-            if 0 <= idx < len(wallets):
-                wallet_name = wallets[idx]["name"]
-                # 🔥 CAMBIA WALLET E MOSTRA INFO
-                if self._switch_wallet(wallet_name):
-                    print_green(f"✅ Wallet cambiato a: {wallet_name}")
-                    self.cmd_info()  # 🔥 USA cmd_info() CHE ESISTE GIÀ!
-                else:
-                    print_red(f"❌ Errore nel cambio wallet")
-    
-    def cmd_switch(self, name: str):
-        """Cambia il wallet attivo con quello specificato"""
-        # VALIDA IL NOME PRIMA DI USARLO
-        if not self._validate_wallet_name(name):
-            return
-        
-        if self._switch_wallet(name):
-            print_green(f"✅ Wallet cambiato a: {name}")
-            
-            wallet_file = self.wallets_dir / f"{name}.json"
-            
-            # Path traversal protection
-            try:
-                wallet_file.resolve().relative_to(self.wallets_dir.resolve())
-            except ValueError:
-                print_red(f"❌ Percorso non valido: {wallet_file}")
-                return
-            
-            if wallet_file.exists():
+            for i, tl in enumerate(trustlines, 1):
+                asset = tl.get('currency', tl.get('asset_code', '???'))
+                issuer = tl.get('issuer', tl.get('asset_issuer', 'N/A'))
+                balance = tl.get('balance', 0)
+                limit = tl.get('limit', 0)
+                is_active = tl.get('is_active', False)
+                
+                # 🔥 FORMATTA NUMERI
                 try:
-                    with open(wallet_file) as f:
-                        data = json.load(f)
-                        network = data.get("network", "testnet")
-                        if self.wallet:
-                            self.wallet._xrp_manager.set_network(network)
-                            print_yellow(f"🌐 Rete impostata a: {network.upper()}")
+                    bal_str = f"{float(balance):.6f}".rstrip('0').rstrip('.')
+                    if not bal_str:
+                        bal_str = "0"
                 except:
-                    pass
+                    bal_str = str(balance)
+                
+                try:
+                    lim_str = f"{float(limit):.6f}".rstrip('0').rstrip('.')
+                    if not lim_str:
+                        lim_str = "0"
+                except:
+                    lim_str = str(limit)
+                
+                # 🔥 STATUS
+                if is_active:
+                    status = "✅ Active"
+                elif balance > 0:
+                    status = "⚠️ Has balance"
+                else:
+                    status = "⏳ Pending"
+                
+                # 🔥 TRONCA ISSUER SE TROPPO LUNGO
+                issuer_display = issuer if len(issuer) <= 34 else issuer[:32] + "..."
+                
+                print(f"{i:<4} {asset:<12} {issuer_display:<36} {bal_str:<16} {lim_str:<14} {status}")
             
-            self.cmd_info()
+            print("=" * 100)
+            print(f"Total: {len(trustlines)} trustlines")
+            print("=" * 100)
         else:
-            print_red(f"❌ Wallet '{name}' non trovato.")
+            print_red(f"❌ {result.get('message', 'Errore')}")
     
-    def cmd_wallet(self, args: List[str]):
-        if not args:
-            name = self._get_active_wallet_name()
-            if name:
-                print(f"📂 Wallet attivo: {name}")
-                self.cmd_info()
-            else:
-                print_red("❌ Nessun wallet attivo.")
-                print("   Usa 'wallet NOME' per crearne uno nuovo.")
-            return
-        
-        name = args[0]
-        if not self._validate_wallet_name(name):
-            return
-        
-        target = self.wallets_dir / f"{name}.json"
-        
-        # Path traversal protection
+    def _cmd_trustline_create(self):
+        """Crea trustline"""
+        asset = input("Asset (es. RLUSD): ").strip()
+        issuer = input("Issuer address: ").strip()
         try:
-            target.resolve().relative_to(self.wallets_dir.resolve())
+            limit = float(input("Limite (0 per rimuovere): ").strip() or "0")
         except ValueError:
-            print_red(f"❌ Percorso non valido: {target}")
-            return
-        
-        if target.exists():
-            self.cmd_switch(name)
-            return
-        
-        print(f"\n📂 CREA NUOVO WALLET: {name}")
-        print("=" * 60)
-        
-        crypto = input("Crypto (XRP/XLM): ").strip().upper() or "XRP"
-        network = input("Rete (testnet/mainnet): ").strip().lower() or "testnet"
-        
-        self.init(network)
-        self.cmd_create(name, crypto, network)
-
-    # ============================================================
-    # TRUSTLINE - COMANDI
-    # ============================================================
-
-    def cmd_trustlines(self, args: List[str]):
-        if not self.wallet:
-            self.init()
-        
-        manager = self.wallet._xrp_manager
-        
-        if not manager.is_loaded():
-            print_red("❌ Nessun wallet caricato!")
-            return
-        
-        force_refresh = "--refresh" in args or "-r" in args
-        
-        print_blue(f"🔗 Recupero trustline ({manager.crypto_type}) su {manager.network.upper()}...")
-        trustlines = manager.get_trustlines(force_refresh)
-        
-        if not trustlines:
-            print_yellow("❌ Nessuna trustline trovata.")
-            print_yellow("   Crea una trustline con: trustline-set ASSET ISSUER [LIMIT]")
-            return
-        
-        print_bold(f"\n🔗 TRUSTLINE ({manager.crypto_type})")
-        print("=" * 100)
-        
-        if manager.crypto_type == "XRP":
-            print(f"{'#':<3} {'Asset':<12} {'Issuer':<40} {'Balance':<15} {'Limit':<15} {'Status'}")
-            print("-" * 100)
-            for i, tl in enumerate(trustlines, 1):
-                status = "✅ Attiva" if tl.get("is_active") else "⏳ In attesa"
-                balance = tl.get("balance", 0)
-                limit = tl.get("limit", 0)
-                print(f"{i:<3} {tl['currency']:<12} {tl['issuer']:<40} {balance:<15.6f} {limit:<15.6f} {status}")
-        else:
-            print(f"{'#':<3} {'Asset':<12} {'Issuer':<40} {'Balance':<15} {'Limit':<15} {'Status'}")
-            print("-" * 100)
-            for i, tl in enumerate(trustlines, 1):
-                status = "✅ Attiva" if tl.get("is_active") else "⏳ In attesa"
-                balance = tl.get("balance", 0)
-                limit = tl.get("limit", 0)
-                print(f"{i:<3} {tl['asset_code']:<12} {tl['asset_issuer']:<40} {balance:<15.6f} {limit:<15.6f} {status}")
-        
-        print("=" * 100)
-        print(f"Totale: {len(trustlines)} trustline")
-
-    def cmd_trustline_set(self, args: List[str]):
-        if not self.wallet:
-            self.init()
-        
-        manager = self.wallet._xrp_manager
-        
-        if not manager.is_loaded():
-            print_red("❌ Nessun wallet caricato!")
-            return
-        
-        if len(args) < 2:
-            print_red("❌ Specifica asset e issuer.")
-            print("Esempio: trustline-set RLUSD rHb9CJAWyB4rj91VRwn96DkukG4bwdtyth")
-            print("         trustline-set RLUSD rHb9CJAWyB4rj91VRwn96DkukG4bwdtyth 10000")
-            print("         trustline-set RLUSD rHb9CJAWyB4rj91VRwn96DkukG4bwdtyth 0  # per rimuovere")
-            return
-        
-        asset_code = args[0]
-        issuer = args[1]
-        limit = float(args[2]) if len(args) > 2 else 0  # Default: 0 = rimuovi
-        
-        if limit == 0:
-            limit_display = "0 (RIMUOVI)"
-        else:
-            limit_display = str(limit)
-        
-        print(f"\n🔗 Creazione trustline per {asset_code} su {manager.network.upper()}")
-        print("=" * 60)
-        print(f"   Asset: {asset_code}")
-        print(f"   Issuer: {issuer}")
-        print(f"   Limite: {limit_display}")
-        print("=" * 60)
-        
-        confirm = input("   Confermi? (s/n): ")
-        if confirm.lower() != 's':
-            print("❌ Annullato.")
-            return
-        
-        result = manager.set_trustline(asset_code, issuer, limit)
-        
+            limit = 0
+        result = self.backend.create_trustline(asset, issuer, limit)
         if result.get("success"):
-            print_green(f"\n✅ Trustline {'rimossa' if limit == 0 else 'creata'} per {asset_code}!")
-            print(f"   Hash: {result.get('hash', 'unknown')}")
-            print(f"   Network: {result.get('network', 'N/A')}")
-            print(f"   Limit: {result.get('limit', 'N/A')}")
+            print_green(f"✅ Trustline creata per {asset}!")
+            print(f"   Hash: {result.get('hash', 'N/A')}")
         else:
-            print_red(f"❌ Errore: {result.get('error', 'unknown')}")
-
-    def cmd_trustline_remove(self, args: List[str]):
-        if not self.wallet:
-            self.init()
-        
-        manager = self.wallet._xrp_manager
-        
-        if not manager.is_loaded():
-            print_red("❌ Nessun wallet caricato!")
-            return
-        
-        if len(args) < 2:
-            print_red("❌ Specifica asset e issuer.")
-            print("Esempio: trustline-remove RLUSD rHb9CJAWyB4rj91VRwn96DkukG4bwdtyth")
-            return
-        
-        asset_code = args[0]
-        issuer = args[1]
-        
-        print(f"\n🗑️ Rimozione trustline per {asset_code}")
-        print("=" * 60)
-        print(f"   Asset: {asset_code}")
-        print(f"   Issuer: {issuer}")
-        print("=" * 60)
-        
-        confirm = input("   Confermi? (s/n): ")
-        if confirm.lower() != 's':
-            print("❌ Annullato.")
-            return
-        
-        result = manager.remove_trustline(asset_code, issuer)
-        
+            print_red(f"❌ {result.get('message', 'Errore')}")
+    
+    def _cmd_trustline_remove(self):
+        """Rimuovi trustline"""
+        asset = input("Asset: ").strip()
+        issuer = input("Issuer address: ").strip()
+        result = self.backend.remove_trustline(asset, issuer)
         if result.get("success"):
-            print_green(f"\n✅ Trustline rimossa per {asset_code}!")
-            print(f"   Hash: {result.get('hash', 'unknown')}")
+            print_green(f"✅ Trustline rimossa per {asset}!")
         else:
-            print_red(f"❌ Errore: {result.get('error', 'unknown')}")
-
-    def cmd_trustline_info(self, args: List[str]):
-        if not self.wallet:
-            self.init()
-        
-        manager = self.wallet._xrp_manager
-        
-        if not manager.is_loaded():
-            print_red("❌ Nessun wallet caricato!")
-            return
-        
-        if len(args) < 1:
-            print_red("❌ Specifica asset.")
-            print("Esempio: trustline-info RLUSD")
-            return
-        
-        asset_code = args[0]
-        issuer = args[1] if len(args) > 1 else None
-        
-        result = manager.get_trustline_balance(asset_code, issuer)
-        
-        if "error" in result:
-            print_red(f"❌ {result['error']}")
-            return
-        
-        print_bold(f"\n📊 INFO TRUSTLINE {asset_code}")
-        print("=" * 60)
-        print(f"   Asset: {result.get('asset')}")
-        print(f"   Issuer: {result.get('issuer')}")
-        print(f"   Balance: {result.get('balance', 0):.6f}")
-        print(f"   Limit: {result.get('limit', 0):.6f}")
-        print(f"   Status: {'✅ Attiva' if result.get('is_active') else '⏳ In attesa'}")
-        print("=" * 60)
-
+            print_red(f"❌ {result.get('message', 'Errore')}")
+    
+    def _cmd_trustline_info(self):
+        """Info trustline"""
+        asset = input("Asset: ").strip()
+        issuer = input("Issuer (opzionale): ").strip() or None
+        result = self.backend.get_trustline_info(asset, issuer)
+        if result.get("success"):
+            print_bold(f"\n📊 INFO TRUSTLINE {asset}")
+            print("=" * 60)
+            print(f"   Asset: {result.get('asset', 'N/A')}")
+            print(f"   Issuer: {result.get('issuer', 'N/A')}")
+            print(f"   Balance: {result.get('balance', 0):.6f}")
+            print(f"   Limit: {result.get('limit', 0):.6f}")
+            print(f"   Status: {'✅ Attiva' if result.get('is_active') else '⏳ In attesa'}")
+        else:
+            print_red(f"❌ {result.get('message', 'Errore')}")
+    
     # ============================================================
-    # TOKEN - COMANDI (INVIO E RICEZIONE)
+    # TOKEN
     # ============================================================
-
-    def cmd_send_token(self, args: List[str]):
-        """Invia un token (non XRP) da emettitore a ricevente"""
-        if not self.wallet:
-            self.init()
-        
-        manager = self.wallet._xrp_manager
-        
-        if not manager.is_loaded():
-            print_red("❌ Nessun wallet caricato!")
+    
+    def _cmd_send_token(self):
+        """Invia token"""
+        to_addr = input("Indirizzo destinatario: ").strip()
+        if not to_addr:
             return
-        
-        to_address = None
-        token = None
-        amount = None
-        issuer = None
-        
-        for i, arg in enumerate(args):
-            if arg == "--to" and i + 1 < len(args):
-                to_address = args[i + 1]
-            elif arg == "--token" and i + 1 < len(args):
-                token = args[i + 1]
-            elif arg == "--amount" and i + 1 < len(args):
-                amount = float(args[i + 1])
-            elif arg == "--issuer" and i + 1 < len(args):
-                issuer = args[i + 1]
-        
-        if not to_address or not token or not amount:
-            print_red("❌ Specifica --to, --token e --amount")
-            print("Esempio: send-token --to r... --token Arg0 --amount 1000")
+        token = input("Nome token (es. Arg0): ").strip()
+        if not token:
             return
-        
-        if not issuer:
-            issuer = manager.get_address()
-            print_yellow(f"📌 Usando issuer: {issuer} (wallet corrente)")
-        
-        print(f"\n📤 Invio token {token} da {manager.get_address()} a {to_address}")
-        print(f"   Issuer: {issuer}")
-        print(f"   Amount: {amount}")
-        print("=" * 60)
-        
-        confirm = input("   Confermi? (s/n): ")
-        if confirm.lower() != 's':
-            print("❌ Annullato.")
-            return
-        
         try:
-            from xrpl.models.transactions import Payment
-            from xrpl.transaction import autofill, sign, submit_and_wait
-            from xrpl.clients import JsonRpcClient
-            from xrpl.models.amounts import IssuedCurrencyAmount
-            
-            urls = {
-                "mainnet": "https://s1.ripple.com:51234/",
-                "testnet": "https://s.altnet.rippletest.net:51234/",
-                "devnet": "https://s.devnet.rippletest.net:51234/"
-            }
-            client = JsonRpcClient(urls.get(manager.network, urls["testnet"]))
-            
-            wallet = manager.get_wallet("default", 0)
-            
-            if len(token) == 3:
-                currency = token
-            else:
-                currency_hex = token.encode('utf-8').hex().upper()
-                currency = currency_hex.ljust(40, '0')
-            
-            amount_obj = IssuedCurrencyAmount(
-                currency=currency,
-                issuer=issuer,
-                value=str(amount)
-            )
-            
-            payment = Payment(
-                account=wallet.classic_address,
-                destination=to_address,
-                amount=amount_obj
-            )
-            
-            print(f"📡 Invio transazione...")
-            tx = autofill(payment, client)
-            signed_tx = sign(tx, wallet)
-            response = submit_and_wait(signed_tx, client)
-            
-            tx_hash = response.result.get("hash", "unknown")
-            
-            print_green(f"\n✅ {amount} {token} inviati con successo!")
-            print(f"   Hash: {tx_hash}")
-            print(f"   Da: {wallet.classic_address}")
-            print(f"   A: {to_address}")
-            print(f"   Issuer: {issuer}")
-            
-        except Exception as e:
-            print_red(f"❌ Errore: {e}")
-
-    def cmd_receive_token(self, args: List[str]):
-        """Mostra come ricevere un token (crea trustline)"""
-        if not self.wallet:
-            self.init()
-        
-        manager = self.wallet._xrp_manager
-        
-        if not manager.is_loaded():
-            print_red("❌ Nessun wallet caricato!")
+            amount = float(input("Ammontare: ").strip())
+        except ValueError:
+            print_red("❌ Ammontare non valido")
             return
+        issuer = input("Issuer (opzionale): ").strip() or None
         
-        token = None
-        issuer = None
-        limit = None
+        # 🔥 CHIEDI DESTINATION TAG
+        dest_tag_input = input("Destination Tag (opzionale, numero): ").strip()
+        dest_tag = int(dest_tag_input) if dest_tag_input else None
         
-        for i, arg in enumerate(args):
-            if arg == "--token" and i + 1 < len(args):
-                token = args[i + 1]
-            elif arg == "--issuer" and i + 1 < len(args):
-                issuer = args[i + 1]
-            elif arg == "--limit" and i + 1 < len(args):
-                limit = float(args[i + 1])
-        
-        if not token or not issuer:
-            print_red("❌ Specifica --token e --issuer")
-            print("Esempio: receive-token --token Arg0 --issuer r... --limit 1000000")
-            return
-        
-        if not limit:
-            limit = 1000000.0
-        
-        print_bold(f"\n📥 RICEZIONE TOKEN {token}")
-        print("=" * 60)
-        print(f"   Token: {token}")
-        print(f"   Issuer: {issuer}")
-        print(f"   Limite: {limit}")
-        print("=" * 60)
-        print("\n📋 Per ricevere questo token, devi creare una trustline:")
-        print(f"   python3 wallet_cli.py trustline-set {token} {issuer} {limit}")
-        print("\n💡 Dopo aver creato la trustline, l'emettitore potrà inviarti i token.")
-        print("   Verifica con: python3 wallet_cli.py trustlines --refresh")
-
-
+        result = self.backend.send_token(to_addr, token, amount, issuer, dest_tag)
+        if result.get("success"):
+            print_green(f"✅ {amount} {token} inviati!")
+            print(f"   Hash: {result.get('tx_hash', 'N/A')}")
+        else:
+            print_red(f"❌ {result.get('message', 'Errore')}")
+    
     # ============================================================
-    # RETICULUM - COMANDI (USANO LA STESSA ISTANZA)
+    # RETICULUM
     # ============================================================
-
-    def cmd_reticulum(self, args: List[str]):
-        """Gestione Reticulum"""
-        if not RETICULUM_AVAILABLE:
-            print_red("❌ Reticulum non disponibile")
-            return
-        
-        if not args:
-            self._reticulum_help()
-            return
-
-        subcmd = args[0].lower() if args else ""
-        
-        if subcmd == "init":
-            self._reticulum_init()
-        elif subcmd == "gateway" and len(args) > 1:
-            if args[1] == "start":
-                self._reticulum_gateway_start()
-            elif args[1] == "stop":
-                self._reticulum_gateway_stop()
-            elif args[1] == "status":
-                self._reticulum_gateway_status()
+    
+    def _menu_reticulum(self):
+        while True:
+            status = self.backend.get_status()
+            internet_status = "🌐 ON" if self.backend.use_internet else "📡 OFF (Reticulum)"
+            
+            print("\n" + "=" * 50)
+            print("  📡 RETICULUM")
+            print("=" * 50)
+            print(f"  Gateway: {'✅ Attivo' if status.get('gateway_active') else '❌ Fermo'}")
+            print(f"  Peer conosciuti: {status.get('wallet_count', 0)}")
+            print(f"  Modalità internet: {internet_status}")
+            
+            print("\n" + "-" * 50)
+            print("  1) Stato gateway")
+            print("  2) Avvia gateway")
+            print("  3) Ferma gateway")
+            print("  4) Scopri gateway")
+            print("  5) Scopri wallet")
+            print("  6) Peer metriche")
+            print("  7) Miglior gateway")
+            print("  8) Richiedi info gateway")
+            print("  9) Invia transazione")
+            print(" 10) Testa tutti i gateway")
+            print(" 11) 🌐 Toggle internet (usa Reticulum)")
+            print(" 12) 🗑️ Rimuovi gateway manualmente")  # <-- NUOVA OPZIONE
+            print("  0) Torna al menu principale")
+            print("-" * 50)
+            
+            sub = input("\nScelta: ").strip()
+            
+            if sub == '0':
+                break
+            elif sub == '1':
+                self._cmd_gateway_status()
+            elif sub == '2':
+                self._cmd_gateway_start()
+            elif sub == '3':
+                self._cmd_gateway_stop()
+            elif sub == '4':
+                self._cmd_discover_gateways()
+            elif sub == '5':
+                self._cmd_discover_wallets()
+            elif sub == '6':
+                self._cmd_peer_metrics()
+            elif sub == '7':
+                self._cmd_best_gateway()
+            elif sub == '8':
+                self._cmd_request_info()
+            elif sub == '9':
+                self._cmd_send_reticulum()
+            elif sub == '10':
+                self._cmd_test_gateways()
+            elif sub == '11':
+                self._cmd_toggle_internet()
+            elif sub == '12':
+                self._cmd_remove_gateway()
             else:
-                print(f"❌ Sottocomando sconosciuto: {args[1]}")
-        elif subcmd == "wallet" and len(args) > 1:
-            if args[1] == "start":
-                self._reticulum_wallet_start()
-            elif args[1] == "stop":
-                self._reticulum_wallet_stop()
-            elif args[1] == "status":
-                self._reticulum_wallet_status()
-            else:
-                print(f"❌ Sottocomando sconosciuto: {args[1]}")
-        elif subcmd == "discover":
-            self._reticulum_discover()
-        elif subcmd == "discover-wallets":
-            self._reticulum_discover_wallets()
-        elif subcmd == "peers":
-            self._reticulum_peers()
-        elif subcmd == "best":
-            asset = args[1] if len(args) > 1 else None
-            self._reticulum_best_gateway(asset)
-        elif subcmd == "send":
-            self._reticulum_send(args[1:])
-        else:
-            print(f"❌ Comando sconosciuto: {subcmd}")
-
-    def _reticulum_wallet_start(self):
-        """Avvia il wallet"""
-        if not self.reticulum:
-            print_red("❌ Reticulum non inizializzato")
-            return
-        
-        status = self.reticulum.get_status()
-        if status.get('is_wallet', False):
-            print_yellow(f"⚠️ Wallet già avviato")
-            return
-        
-        print_blue("📡 Avvio wallet Reticulum...")
-        self.reticulum.start_wallet(blocking=False)
-        
-        time.sleep(1)
-        status = self.reticulum.get_status()
-        if status.get('is_wallet', False):
-            print_green(f"✅ Wallet avviato")
-            print_yellow(f"   Wallet Name: {status.get('wallet_name', 'Wallet')}")
-            print_yellow(f"   Wallet Hash: {status.get('wallet_address', 'N/A')}")
-        else:
-            print_red("❌ Errore nell'avvio del wallet")
-
-    def _reticulum_wallet_stop(self):
-        """Ferma il wallet"""
-        if not self.reticulum:
-            print_red("❌ Reticulum non inizializzato")
-            return
-        
-        self.reticulum.stop_wallet()
-        print_green("✅ Wallet fermato")
-
-    def _reticulum_wallet_status(self):
-        """Mostra lo stato del wallet"""
-        if not self.reticulum:
-            print_red("❌ Reticulum non inizializzato")
-            return
-        
-        status = self.reticulum.get_status()
-        print_bold("\n📊 STATO WALLET")
-        print("=" * 60)
-        print(f"   Running:          {status.get('running', False)}")
-        print(f"   Wallet:           {status.get('is_wallet', False)}")
-        print(f"   PID:              {status.get('pid', 'N/A')}")
-        started = status.get('started_at')
-        if started:
-            started_str = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(started))
-        else:
-            started_str = 'N/A'
-        print(f"   Started:          {started_str}")
-        print(f"   Wallet Address:   {status.get('wallet_address', 'N/A')}")
-        print(f"   Wallet Name:      {status.get('wallet_name', 'N/A')}")
-        print(f"   Wallet Count:     {status.get('wallet_count', 0)}")
-        print("=" * 60)
-
-    def _reticulum_help(self):
-        print("Comandi Reticulum:")
-        print("  reticulum init          - Inizializza Reticulum (già fatto all'avvio)")
-        print("  reticulum gateway start - Avvia gateway")
-        print("  reticulum gateway stop  - Ferma gateway")
-        print("  reticulum gateway status - Stato gateway")
-        print("  reticulum discover      - Cerca gateway")
-        print("  reticulum discover-wallets - Cerca wallet")
-        print("  reticulum peers         - Mostra peer con metriche")
-        print("  reticulum best ASSET    - Miglior gateway per asset")
-        print("  reticulum send ...      - Invia transazione via Reticulum")
-
-    def _reticulum_init(self):
-        """Inizializza Reticulum (già fatto all'avvio, ma utile per reset)"""
-        if not self.reticulum_initialized:
-            self._init_reticulum()
-        else:
-            print_yellow("⚠️ Reticulum già inizializzato")
-        
-        if self.reticulum:
-            status = self.reticulum.get_status()
-            print_green("📡 Stato Reticulum:")
+                print_red("❌ Scelta non valida")
+    
+    def _cmd_gateway_status(self):
+        """Stato gateway"""
+        result = self.backend.get_gateway_status()
+        if result.get("success"):
+            status = result.get("status", {})
+            print_bold("\n📊 STATO GATEWAY")
+            print("=" * 60)
+            print(f"   Running: {status.get('running', False)}")
+            print(f"   Gateway: {status.get('is_gateway', False)}")
+            print(f"   PID: {status.get('pid', 'N/A')}")
+            if status.get('started_at'):
+                print(f"   Started: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(status['started_at']))}")
             print(f"   Gateway Address: {status.get('gateway_address', 'N/A')}")
             print(f"   Wallet Address: {status.get('wallet_address', 'N/A')}")
-            print(f"   Cache size: {status.get('cache_size', 0)}")
-            if status.get('is_gateway', False):
-                print(f"   Gateway Running: ✅ Sì (PID: {status.get('pid')})")
-            else:
-                print(f"   Gateway Running: ❌ No")
-
-    def _reticulum_gateway_start(self):
-        """Avvia il gateway"""
-        if not self.reticulum:
-            print_red("❌ Reticulum non inizializzato")
-            return
-        
-        status = self.reticulum.get_status()
-        if status.get('is_gateway', False):
-            print_yellow(f"⚠️ Gateway già avviato (PID: {status.get('pid')})")
-            return
-        
-        print_blue("📡 Avvio gateway Reticulum...")
-        self.reticulum.start_gateway(blocking=False)
-        
-        time.sleep(1)
-        status = self.reticulum.get_status()
-        if status.get('is_gateway', False):
-            print_green(f"✅ Gateway avviato (PID: {status.get('pid')})")
-            print_yellow(f"   Gateway Name: {status.get('gateway_name', 'Gateway')}")
-            print_yellow(f"   Gateway Hash: {status.get('gateway_address', 'N/A')}")
+            print(f"   Gateway Count: {status.get('gateway_count', 0)}")
+            print(f"   Wallet Count: {status.get('wallet_count', 0)}")
+            print("=" * 60)
         else:
-            print_red("❌ Errore nell'avvio del gateway")
-
-    def _reticulum_gateway_stop(self):
-        """Ferma il gateway"""
-        if not self.reticulum:
-            print_red("❌ Reticulum non inizializzato")
-            return
-        
-        self.reticulum.stop_gateway()
-        print_green("✅ Gateway fermato")
-
-    def _reticulum_gateway_status(self):
-        """Mostra lo stato del gateway"""
-        if not self.reticulum:
-            print_red("❌ Reticulum non inizializzato")
-            return
-        
-        status = self.reticulum.get_status()
-        print_bold("\n📊 STATO GATEWAY")
-        print("=" * 60)
-        print(f"   Running:          {status.get('running', False)}")
-        print(f"   Gateway:          {status.get('is_gateway', False)}")
-        print(f"   Wallet:           {status.get('is_wallet', False)}")
-        print(f"   PID:              {status.get('pid', 'N/A')}")
-        started = status.get('started_at')
-        if started:
-            started_str = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(started))
+            print_red(f"❌ {result.get('message', 'Errore')}")
+    
+    def _cmd_gateway_start(self):
+        """Avvia gateway"""
+        result = self.backend.start_gateway()
+        if result.get("success"):
+            print_green("✅ Gateway avviato")
         else:
-            started_str = 'N/A'
-        print(f"   Started:          {started_str}")
-        print(f"   Gateway Address:  {status.get('gateway_address', 'N/A')}")
-        print(f"   Wallet Address:   {status.get('wallet_address', 'N/A')}")
-        print(f"   Gateway Name:     {status.get('gateway_name', 'N/A')}")
-        print(f"   Wallet Name:      {status.get('wallet_name', 'N/A')}")
-        print(f"   Gateway Count:    {status.get('gateway_count', 0)}")
-        print(f"   Wallet Count:     {status.get('wallet_count', 0)}")
+            print_red(f"❌ {result.get('message', 'Errore')}")
+    
+    def _cmd_gateway_stop(self):
+        """Ferma gateway"""
+        result = self.backend.stop_gateway()
+        if result.get("success"):
+            print_green("✅ Gateway fermato")
+        else:
+            print_red(f"❌ {result.get('message', 'Errore')}")
+    
+    def _cmd_discover_gateways(self):
+        """Scopri gateway - FORMATTATO COME PRIMA"""
+        result = self.backend.discover_gateways()
         
-        # ============================================================
-        # STATO INTERNET - CONFIGURAZIONE E REALE
-        # ============================================================
-        use_internet = status.get('use_internet', False)
-        has_internet = status.get('has_internet', False)
-        print(f"\n   🌐 INTERNET:")
-        print(f"      Config:        {'ON' if use_internet else 'OFF'}")
-        print(f"      Connessione:   {'✅' if has_internet else '❌'}")
-        
-        # Latenze ledger
-        xrp_reachable = status.get('xrp_reachable', False)
-        xrp_latency = status.get('xrp_latency_ms')
-        stellar_reachable = status.get('stellar_reachable', False)
-        stellar_latency = status.get('stellar_latency_ms')
-        
-        print(f"\n   📊 LEDGER:")
-        print(f"      XRP:          {'✅' if xrp_reachable else '❌'} {xrp_latency}ms" if xrp_latency else f"      XRP:          {'✅' if xrp_reachable else '❌'}")
-        print(f"      Stellar:      {'✅' if stellar_reachable else '❌'} {stellar_latency}ms" if stellar_latency else f"      Stellar:      {'✅' if stellar_reachable else '❌'}")
-        
-        print("=" * 60)
-
-    def _reticulum_discover(self):
-        """Cerca gateway - mostra TUTTI quelli in cache con first_seen e last_seen"""
-        if not self.reticulum:
-            print_red("❌ Reticulum non inizializzato")
+        if not result.get("success"):
+            print_red(f"❌ {result.get('message', 'Errore')}")
             return
         
-        print_blue("🔍 Ricerca gateway Reticulum...")
-        
-        # Ottieni gateway dalla cache (TUTTI, non solo quelli attivi)
-        gateways = self.reticulum.discover_gateways()
+        gateways = result.get("gateways", [])
         
         print_bold(f"\n🔍 GATEWAY TROVATI ({len(gateways)})")
         print("=" * 100)
+        print(f"{'Nome':<20} {'Hash':<36} {'First Seen':<20} {'Last Seen':<20} {'Hops':<6}")
+        print("-" * 100)
         
-        if gateways:
-            print(f"{'Nome':<20} {'Hash':<36} {'First Seen':<20} {'Last Seen':<20} {'Hops':<6}")
-            print("-" * 100)
+        for gw in gateways:
+            name = gw.get('name', 'Sconosciuto')[:18]
+            gw_id = gw.get('gateway_id', '?')
+            first_seen = gw.get('first_seen')
+            last_seen = gw.get('last_seen')
             
-            for gw in gateways:
-                name = gw.get('name', 'Sconosciuto')[:18]
-                gw_id = gw.get('gateway_id', '?')
-                first_seen = gw.get('first_seen')
-                last_seen = gw.get('last_seen')
-                
-                first_str = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(first_seen)) if first_seen else 'Mai'
-                last_str = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(last_seen)) if last_seen else 'Mai'
-                hops = gw.get('hops', '?')
-                
-                print(f"{name:<20} {gw_id:<36} {first_str:<20} {last_str:<20} {hops:<6}")
+            first_str = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(first_seen)) if first_seen else 'Mai'
+            last_str = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(last_seen)) if last_seen else 'Mai'
+            hops = gw.get('hops', '?')
             
-            print("=" * 100)
-            print(f"Totale: {len(gateways)} gateway in cache")
-        else:
-            print("   ❌ Nessun gateway trovato in cache")
+            print(f"{name:<20} {gw_id:<36} {first_str:<20} {last_str:<20} {hops:<6}")
+        
+        print("=" * 100)
+        print(f"Totale: {len(gateways)} gateway in cache")
         print("=" * 100)
 
-    def _reticulum_discover_wallets(self):
-        """Cerca wallet - mostra TUTTI quelli in cache con first_seen e last_seen"""
-        if not self.reticulum:
-            print_red("❌ Reticulum non inizializzato")
+    def _cmd_discover_wallets(self):
+        """Scopri wallet - FORMATTATO COME PRIMA"""
+        result = self.backend.discover_wallets()
+        
+        if not result.get("success"):
+            print_red(f"❌ {result.get('message', 'Errore')}")
             return
         
-        print_blue("🔍 Ricerca wallet Reticulum...")
-        
-        # Ottieni wallet dalla cache (TUTTI, non solo quelli attivi)
-        wallets = self.reticulum.discover_wallets()
+        wallets = result.get("wallets", [])
         
         print_bold(f"\n🔍 WALLET TROVATI ({len(wallets)})")
         print("=" * 100)
+        print(f"{'Nome':<20} {'Hash':<36} {'First Seen':<20} {'Last Seen':<20} {'Hops':<6}")
+        print("-" * 100)
         
-        if wallets:
-            print(f"{'Nome':<20} {'Hash':<36} {'First Seen':<20} {'Last Seen':<20} {'Hops':<6}")
-            print("-" * 100)
+        for w in wallets:
+            name = w.get('name', 'Sconosciuto')[:18]
+            w_id = w.get('wallet_id', '?')
+            first_seen = w.get('first_seen')
+            last_seen = w.get('last_seen')
             
-            for w in wallets:
-                name = w.get('name', 'Sconosciuto')[:18]
-                w_id = w.get('wallet_id', '?')
-                first_seen = w.get('first_seen')
-                last_seen = w.get('last_seen')
-                
-                first_str = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(first_seen)) if first_seen else 'Mai'
-                last_str = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(last_seen)) if last_seen else 'Mai'
-                hops = w.get('hops', '?')
-                
-                print(f"{name:<20} {w_id:<36} {first_str:<20} {last_str:<20} {hops:<6}")
+            first_str = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(first_seen)) if first_seen else 'Mai'
+            last_str = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(last_seen)) if last_seen else 'Mai'
+            hops = w.get('hops', '?')
             
-            print("=" * 100)
-            print(f"Totale: {len(wallets)} wallet in cache")
-        else:
-            print("   ❌ Nessun wallet trovato in cache")
+            print(f"{name:<20} {w_id:<36} {first_str:<20} {last_str:<20} {hops:<6}")
+        
         print("=" * 100)
-
-    def _reticulum_peers(self):
-        if not self.metrics:
-            print_red("❌ Metriche non disponibili")
+        print(f"Totale: {len(wallets)} wallet in cache")
+        print("=" * 100)
+    
+    def _cmd_peer_metrics(self):
+        """Peer metriche - USA SCORE DAL BACKEND"""
+        result = self.backend.get_peer_metrics()
+        
+        if not result.get("success"):
+            print_red(f"❌ {result.get('message', 'Errore')}")
             return
         
-        peers = self.metrics.get_all_peers()
-        
+        peers = result.get("peers", [])
         if not peers:
             print_yellow("⚠️ Nessun peer conosciuto")
             return
         
-        # ============================================================
-        # CALCOLA PUNTEGGIO PERFORMANCE
-        # ============================================================
-        def calculate_score(p):
-            score = 0.0
-            
-            # Affidabilità (Rel) - peso 40
-            rel = p.get('reliability', 0)
-            score += rel * 40
-            
-            # Reputazione - peso 0.3
+        print_bold(f"\n🔍 PEER ORDINATI PER PERFORMANCE ({len(peers)})")
+        print("=" * 260)
+        print(f"{'#':<3} {'Nome':<22} {'Score':<6} {'Rel':<6} {'Rep':<4} {'Hops':<5} {'RTT':<8} {'XRP':<14} {'Stellar':<14} {'Internet':<9} {'Ultimo visto':<15} {'ID':<36} {'Assets'}")
+        print("-" * 260)
+        
+        for idx, p in enumerate(peers, 1):
+            # 🔥 SCORE GIÀ CALCOLATO DAL BACKEND
+            sc = round(p.get('_score', 0))
+            name = str(p.get('name', 'UNKNOWN'))[:16]            
+            rel = round(p.get('reliability', 0), 2)
             rep = p.get('reputation', 50)
-            score += rep * 0.3
+            hops = str(p.get('hops', '?'))
+            rtt = f"{p.get('latency_ms', '?')}ms"
             
-            # Latenza RTT (minore è meglio)
-            latency = p.get('latency_ms')
-            if latency and latency > 0:
-                if latency < 50:
-                    score += 15
-                elif latency < 100:
-                    score += 10
-                elif latency < 200:
-                    score += 5
-                elif latency < 500:
-                    score -= 5
-                else:
-                    score -= 15
-            
-            # Hops (meno hop = meglio)
-            hops = p.get('hops')
-            if hops:
-                if hops == 1:
-                    score += 10
-                elif hops == 2:
-                    score += 5
-                elif hops == 3:
-                    score += 0
-                else:
-                    score -= hops * 2
-            
-            # XRP raggiungibile
+            # XRP
             if p.get('xrp_reachable'):
-                score += 5
                 xrp_lat = p.get('xrp_latency_ms')
-                if xrp_lat and xrp_lat < 200:
-                    score += 5
-                elif xrp_lat and xrp_lat < 500:
-                    score += 2
+                xrp_str = f"✅{xrp_lat}ms" if xrp_lat else "✅ OK"
+            else:
+                xrp_str = "❌"
             
-            # Stellar raggiungibile
+            # Stellar
             if p.get('stellar_reachable'):
-                score += 5
                 stellar_lat = p.get('stellar_latency_ms')
-                if stellar_lat and stellar_lat < 200:
-                    score += 5
-                elif stellar_lat and stellar_lat < 500:
-                    score += 2
+                stellar_str = f"✅{stellar_lat}ms" if stellar_lat else "✅ OK"
+            else:
+                stellar_str = "❌"
             
-            # Internet
-            if p.get('has_internet'):
-                score += 3
+            internet = "🌐" if p.get('has_internet') else "📡"
+            last_seen = format_time_ago(p.get('last_seen'))  # <-- USA FUNZIONE GLOBALE
+            gw_id = p.get('gateway_id', 'N/A')[:36]
             
-            # RSSI (se disponibile)
-            rssi = p.get('rssi')
-            if rssi is not None:
-                if rssi > -60:
-                    score += 5
-                elif rssi > -80:
-                    score += 2
-                elif rssi < -100:
-                    score -= 5
+            assets = p.get('assets', [])
+            if isinstance(assets, list):
+                assets_str = ', '.join(assets[:3])
+                if len(assets) > 3:
+                    assets_str += f" +{len(assets)-3}"
+            else:
+                assets_str = str(assets)[:20]
             
-            return max(0, min(100, score))
-        
-        # ============================================================
-        # ORDINA PER PUNTEGGIO (dal migliore al peggiore)
-        # ============================================================
-        peers_sorted = sorted(peers, key=calculate_score, reverse=True)
-        
-        # ============================================================
-        # VERIFICA SE CI SONO DATI RADIO
-        # ============================================================
-        has_radio = any(p.get('rssi') is not None or p.get('snr') is not None for p in peers)
-        
-        # ============================================================
-        # STAMPA CON RADIO
-        # ============================================================
-        if has_radio:
-            print_bold(f"\n🔍 PEER ORDINATI PER PERFORMANCE ({len(peers_sorted)})")
-            print("=" * 260)
-            print(f"{'#':<3} {'Nome':<14} {'Score':<6} {'Rel':<6} {'Rep':<4} {'Hops':<5} {'RTT':<8} {'RSSI':<10} {'SNR':<10} {'XRP':<14} {'Stellar':<14} {'Internet':<9} {'Ultimo visto':<15} {'ID':<36} {'Assets'}")
-            print("-" * 260)
+            # Colori
+            sc_color = Colors.GREEN if sc > 70 else Colors.YELLOW if sc > 40 else Colors.RED
+            rel_color = Colors.GREEN if rel > 0.9 else Colors.YELLOW if rel > 0.7 else Colors.RED
             
-            for idx, p in enumerate(peers_sorted, 1):
-                sc = calculate_score(p)
-                name = str(p.get('name', 'UNKNOWN'))[:12]
-                rel = p.get('reliability', 0)
-                rep = p.get('reputation', 50)
-                hops = str(p.get('hops', '?'))
-                rtt = f"{p.get('latency_ms', '?')}ms"
-                
-                # RSSI
-                rssi = p.get('rssi')
-                if rssi is not None:
-                    if rssi > -60:
-                        rssi_color = Colors.GREEN
-                    elif rssi > -80:
-                        rssi_color = Colors.YELLOW
-                    else:
-                        rssi_color = Colors.RED
-                    rssi_str = f"{rssi_color}{rssi:.1f}dBm{Colors.RESET}"
-                else:
-                    rssi_str = 'N/A'
-                
-                # SNR
-                snr = p.get('snr')
-                if snr is not None:
-                    if snr > 15:
-                        snr_color = Colors.GREEN
-                    elif snr > 8:
-                        snr_color = Colors.YELLOW
-                    else:
-                        snr_color = Colors.RED
-                    snr_str = f"{snr_color}{snr:.1f}dB{Colors.RESET}"
-                else:
-                    snr_str = 'N/A'
-                
-                # XRP
-                if p.get('xrp_reachable'):
-                    xrp_lat = p.get('xrp_latency_ms')
-                    xrp_str = f"✅{xrp_lat}ms" if xrp_lat else "✅ OK"
-                else:
-                    xrp_str = "❌"
-                
-                # Stellar
-                if p.get('stellar_reachable'):
-                    stellar_lat = p.get('stellar_latency_ms')
-                    stellar_str = f"✅{stellar_lat}ms" if stellar_lat else "✅ OK"
-                else:
-                    stellar_str = "❌"
-                
-                internet = "🌐" if p.get('has_internet') else "📡"
-                last_seen = self._format_time_ago(p.get('last_seen'))
-                gw_id = p.get('gateway_id', 'N/A')
-                
-                assets = p.get('assets', [])
-                if isinstance(assets, list):
-                    assets_str = ', '.join(assets[:3])
-                    if len(assets) > 3:
-                        assets_str += f" +{len(assets)-3}"
-                else:
-                    assets_str = str(assets)[:20]
-                
-                # Colori
-                sc_color = Colors.GREEN if sc > 70 else Colors.YELLOW if sc > 40 else Colors.RED
-                rel_color = Colors.GREEN if rel > 0.9 else Colors.YELLOW if rel > 0.7 else Colors.RED
-                
-                print(f"{idx:<3} {name:<14} {sc_color}{sc:5.0f}{Colors.RESET} {rel_color}{rel:5.2f}{Colors.RESET} {rep:<4} {hops:<5} {rtt:<8} {rssi_str:<10} {snr_str:<10} {xrp_str:<14} {stellar_str:<14} {internet:<9} {last_seen:<15} {gw_id:<36} {assets_str}")
+            print(f"{idx:<3} {name:<20} {sc_color}{sc:5.0f}{Colors.RESET} {rel_color}{rel:5.2f}{Colors.RESET} {rep:<4} {hops:<5} {rtt:<8} {xrp_str:<14} {stellar_str:<14} {internet:<9} {last_seen:<15} {gw_id:<36} {assets_str}")
         
-        # ============================================================
-        # STAMPA SENZA RADIO
-        # ============================================================
-        else:
-            print_bold(f"\n🔍 PEER ORDINATI PER PERFORMANCE ({len(peers_sorted)})")
-            print("=" * 230)
-            print(f"{'#':<3} {'Nome':<16} {'Score':<6} {'Rel':<6} {'Rep':<4} {'Hops':<5} {'RTT':<8} {'XRP':<14} {'Stellar':<14} {'Internet':<9} {'Ultimo visto':<15} {'ID':<36} {'Assets'}")
-            print("-" * 230)
-            
-            for idx, p in enumerate(peers_sorted, 1):
-                sc = calculate_score(p)
-                name = str(p.get('name', 'UNKNOWN'))[:14]
-                rel = p.get('reliability', 0)
-                rep = p.get('reputation', 50)
-                hops = str(p.get('hops', '?'))
-                rtt = f"{p.get('latency_ms', '?')}ms"
-                
-                # XRP
-                if p.get('xrp_reachable'):
-                    xrp_lat = p.get('xrp_latency_ms')
-                    xrp_str = f"✅{xrp_lat}ms" if xrp_lat else "✅ OK"
-                else:
-                    xrp_str = "❌"
-                
-                # Stellar
-                if p.get('stellar_reachable'):
-                    stellar_lat = p.get('stellar_latency_ms')
-                    stellar_str = f"✅{stellar_lat}ms" if stellar_lat else "✅ OK"
-                else:
-                    stellar_str = "❌"
-                
-                internet = "🌐" if p.get('has_internet') else "📡"
-                last_seen = self._format_time_ago(p.get('last_seen'))
-                gw_id = p.get('gateway_id', 'N/A')
-                
-                assets = p.get('assets', [])
-                if isinstance(assets, list):
-                    assets_str = ', '.join(assets[:3])
-                    if len(assets) > 3:
-                        assets_str += f" +{len(assets)-3}"
-                else:
-                    assets_str = str(assets)[:20]
-                
-                # Colori
-                sc_color = Colors.GREEN if sc > 70 else Colors.YELLOW if sc > 40 else Colors.RED
-                rel_color = Colors.GREEN if rel > 0.9 else Colors.YELLOW if rel > 0.7 else Colors.RED
-                
-                print(f"{idx:<3} {name:<16} {sc_color}{sc:5.0f}{Colors.RESET} {rel_color}{rel:5.2f}{Colors.RESET} {rep:<4} {hops:<5} {rtt:<8} {xrp_str:<14} {stellar_str:<14} {internet:<9} {last_seen:<15} {gw_id:<36} {assets_str}")
+        print("=" * 260)
         
-        # ============================================================
-        # LINEA FINALE
-        # ============================================================
-        print("=" * (260 if has_radio else 230))
-        
-        # ============================================================
-        # STATISTICHE
-        # ============================================================
-        stats = self.metrics.get_stats() if hasattr(self.metrics, 'get_stats') else {}
+        # Statistiche
+        stats = result.get("stats", {})
         if stats:
             print(f"\n📊 Statistiche:")
             print(f"   Totale peer: {stats.get('total_peers', 0)}")
             print(f"   Online: {stats.get('online_peers', 0)}")
-            print(f"   Reputazione media: {stats.get('avg_reputation', 0)}")
+            print(f"   Offline: {stats.get('offline_peers', 0)}")
+            print(f"   Reputazione media: {round(stats.get('avg_reputation', 0), 1)}")
             if stats.get('avg_latency_ms'):
-                print(f"   Latenza media Reticulum: {stats.get('avg_latency_ms')}ms")
-            if stats.get('avg_rssi'):
-                print(f"   RSSI medio: {stats.get('avg_rssi')}dBm")
+                print(f"   Latenza media Reticulum: {round(stats.get('avg_latency_ms'), 0)}ms")
+            if stats.get('avg_score'):
+                print(f"   Score medio: {round(stats.get('avg_score'))}")
         
-        # ============================================================
-        # MIGLIOR PEER
-        # ============================================================
-        if peers_sorted:
-            b = peers_sorted[0]
-            best_score = calculate_score(b)
+        # Miglior peer
+        if peers:
+            b = peers[0]
+            best_score = b.get('_score', 0)
             print(f"\n🏆 MIGLIOR PEER: {b.get('name', 'UNKNOWN')}")
             print(f"   Score: {best_score:.0f} | Rel: {b.get('reliability', 0):.2f} | Rep: {b.get('reputation', 50)}")
             print(f"   Gateway ID: {b.get('gateway_id', 'N/A')}")
@@ -2378,881 +1123,281 @@ class WalletCLI:
             print(f"   Internet: {'✅' if b.get('has_internet') else '❌'}")
             if b.get('assets'):
                 print(f"   Assets: {', '.join(b.get('assets', []))}")
-            rssi = b.get('rssi')
-            if rssi is not None:
-                print(f"   RSSI: {rssi:.1f}dBm")
-            snr = b.get('snr')
-            if snr is not None:
-                print(f"   SNR: {snr:.1f}dB")
-
-    def _reticulum_best_gateway(self, asset: str):
-        """Mostra il miglior gateway per un asset"""
-        if not self.metrics:
-            print_red("❌ Metriche non disponibili")
-            return
-        
+    
+    def _cmd_best_gateway(self):
+        """Miglior gateway - MOSTRA TUTTE LE INFO"""
+        asset = input("Asset (es. RLUSD): ").strip()
         if not asset:
-            print_red("❌ Specifica un asset (es. RLUSD)")
+            print_red("❌ Specifica un asset")
             return
-        
-        best = self.metrics.get_best_gateway(asset)
-        
-        if best:
-            print_green(f"\n✅ Miglior gateway per {asset}:")
-            print(f"   Nome: {best.get('name', 'UNKNOWN')}")
-            print(f"   ID: {best.get('gateway_id', 'N/A')}")
-            print(f"   Hops: {best.get('hops', '?')}")
-            print(f"   RTT Reticulum: {best.get('latency_ms', '?')}ms")
+        result = self.backend.get_best_gateway(asset)
+        if result.get("success"):
+            gw = result.get("gateway", {})
+            if not gw:
+                print_yellow(f"⚠️ Nessun gateway trovato per {asset}")
+                return
             
-            # Latenze ledger
-            xrp_latency = best.get('xrp_latency_ms')
-            xrp_reachable = best.get('xrp_reachable', False)
-            stellar_latency = best.get('stellar_latency_ms')
-            stellar_reachable = best.get('stellar_reachable', False)
+            print_bold(f"\n🏆 MIGLIOR GATEWAY PER {asset.upper()}")
+            print("=" * 70)
+            print(f"   Nome:           {gw.get('name', 'UNKNOWN')}")
+            print(f"   Gateway ID:     {gw.get('gateway_id', 'N/A')}")
+            print(f"   Hops:           {gw.get('hops', '?')}")
+            print(f"   RTT Reticulum:  {gw.get('latency_ms', '?')}ms")
+            print(f"   Reputazione:    {gw.get('reputation', 50)}")
+            print(f"   Affidabilità:   {gw.get('reliability', 0):.2f}")
+            print(f"   Internet:       {'✅' if gw.get('has_internet') else '❌'}")
+            print(f"   Status:         {'✅ ONLINE' if gw.get('is_online') else '❌ OFFLINE'}")
+            print("-" * 70)
             
-            print(f"   XRP: {'✅' if xrp_reachable else '❌'} {xrp_latency}ms" if xrp_latency else f"   XRP: {'✅' if xrp_reachable else '❌'}")
-            print(f"   Stellar: {'✅' if stellar_reachable else '❌'} {stellar_latency}ms" if stellar_latency else f"   Stellar: {'✅' if stellar_reachable else '❌'}")
+            # XRP
+            if gw.get('xrp_reachable'):
+                print(f"   XRP:            ✅ Raggiungibile ({gw.get('xrp_latency_ms', '?')}ms)")
+            else:
+                print(f"   XRP:            ❌ Non raggiungibile")
             
-            # Metriche radio
-            rssi = best.get('rssi')
-            snr = best.get('snr')
-            if rssi is not None:
-                print(f"   RSSI: {rssi:.1f}dBm")
-            if snr is not None:
-                print(f"   SNR: {snr:.1f}dB")
+            # Stellar
+            if gw.get('stellar_reachable'):
+                print(f"   Stellar:        ✅ Raggiungibile ({gw.get('stellar_latency_ms', '?')}ms)")
+            else:
+                print(f"   Stellar:        ❌ Non raggiungibile")
             
-            print(f"   Reputation: {best.get('reputation', 50)}")
-            print(f"   Reliability: {best.get('reliability', 0):.2f}")
-            print(f"   Internet: {'✅' if best.get('has_internet', False) else '❌'}")
-            print(f"   Networks: {', '.join(best.get('networks', [])) or 'N/A'}")
-            print(f"   Assets: {', '.join(best.get('assets', [])) or 'N/A'}")
-            print(f"   Fee: {best.get('fee', 'N/A')} {best.get('fee_asset', '')}")
+            # Assets
+            assets = gw.get('assets', [])
+            if isinstance(assets, list) and assets:
+                print(f"   Assets:         {', '.join(assets)}")
+            
+            # Networks
+            networks = gw.get('networks', [])
+            if isinstance(networks, list) and networks:
+                print(f"   Networks:       {', '.join(networks)}")
+            
+            # Fee
+            fee = gw.get('fee', 'N/A')
+            fee_asset = gw.get('fee_asset', '')
+            if fee != 'N/A':
+                print(f"   Fee:            {fee} {fee_asset}")
+            
+            # RSSI/SNR (se disponibili)
+            if gw.get('rssi') is not None:
+                print(f"   RSSI:           {gw.get('rssi')}dBm")
+            if gw.get('snr') is not None:
+                print(f"   SNR:            {gw.get('snr')}dB")
+            
+            print("=" * 70)
         else:
-            print_red(f"❌ Nessun gateway trovato per {asset}")
-
-        def _reticulum_send(self, args: List[str]):
-            """Invia transazione via Reticulum - CON VALIDAZIONE"""
-            if not self.reticulum:
-                print_red("❌ Reticulum non inizializzato")
-                return
-            
-            if not self.wallet or not self.wallet._xrp_manager.is_loaded():
-                print_red("❌ Nessun wallet caricato!")
-                return
-
-            to_addr = None
-            amount = None
-            asset = "XRP"
-            gateway_id = None
-
-            # Estrai parametri dagli argomenti
-            for i, arg in enumerate(args):
-                if arg == "--to" and i + 1 < len(args):
-                    to_addr = args[i + 1].strip()
-                elif arg == "--amount" and i + 1 < len(args):
-                    try:
-                        amount = float(args[i + 1])
-                    except:
-                        pass
-                elif arg == "--asset" and i + 1 < len(args):
-                    asset = args[i + 1]
-                elif arg == "--gateway" and i + 1 < len(args):
-                    gateway_id = args[i + 1]
-
-            # VALIDA INDIRIZZO
-            if not to_addr:
-                print_red("❌ Indirizzo destinatario non valido")
-                return
-            if len(to_addr) < 20:
-                print_red("❌ Indirizzo troppo corto (minimo 20 caratteri)")
-                return
-
-            # VALIDA AMMONTARE
-            if not amount or amount <= 0:
-                print_red("❌ Ammontare non valido (deve essere > 0)")
-                return
-
-            # CERCA GATEWAY
-            if not gateway_id:
-                print_blue("🔍 Cerco gateway disponibili...")
-                gateways = self.reticulum.discover_gateways()
-                if not gateways:
-                    print_red("❌ Nessun gateway disponibile")
-                    return
-                # Mostra gateway disponibili
-                print_blue(f"📡 Gateway disponibili: {len(gateways)}")
-                for i, gw in enumerate(gateways[:5], 1):
-                    name = gw.get('name', 'UNKNOWN')
-                    gw_id = gw.get('gateway_id', '?')
-                    print(f"   {i}) {name} ({gw_id[:16]}...)")
-                if len(gateways) > 5:
-                    print(f"   ... e altri {len(gateways)-5}")
-                gateway_id = gateways[0].get('gateway_id')
-                print_yellow(f"📌 Usando gateway: {gateway_id[:16]}...")
-
-            manager = self.wallet._xrp_manager
-            tx_data = {
-                "from": manager.get_address(),
-                "to": to_addr,
-                "amount": str(amount),
-                "asset": asset,
-                "network": manager.network,
-                "timestamp": int(time.time())
-            }
-
-            print_blue(f"📡 Invio transazione via Reticulum...")
-            try:
-                response = self.reticulum.send_transaction_via_reticulum(gateway_id, tx_data)
-                if response.get("success"):
-                    print_green(f"✅ Transazione inviata!")
-                    print(f"   Hash: {response.get('hash', 'N/A')}")
-                else:
-                    print_red(f"❌ Errore: {response.get('error', 'Sconosciuto')}")
-            except Exception as e:
-                print_red(f"❌ Errore durante l'invio: {e}")
-
-    def _reticulum_request_info(self):
-        """Richiedi info a un gateway specifico"""
-        if not self.metrics:
+            print_red(f"❌ {result.get('message', 'Errore')}")
+    
+    def _cmd_request_info(self):
+        """Richiedi info a un gateway specifico - USA discover_gateways()"""
+        if not self.backend.metrics:
             print_red("❌ Metriche non disponibili")
             return
         
-        print_blue("🔍 Gateway disponibili:")
-        gateways = self.reticulum.discover_gateways()
-        if not gateways:
-            print_red("❌ Nessun gateway trovato")
+        # 🔥 USA discover_gateways() DEL BACKEND
+        result = self.backend.discover_gateways(active_only=False)
+        
+        if not result.get("success"):
+            print_red(f"❌ {result.get('message', 'Errore')}")
             return
         
-        # Filtra il proprio gateway
-        my_id = self.reticulum.gateway_address
-        filtered = [g for g in gateways if g.get('gateway_id') != my_id]
+        gateways = result.get("gateways", [])
         
-        if not filtered:
+        # 🔥 FILTRA IL PROPRIO GATEWAY
+        my_id = self.backend.reticulum.gateway_address if hasattr(self.backend.reticulum, 'gateway_address') else None
+        if my_id:
+            gateways = [g for g in gateways if g.get('gateway_id') != my_id]
+        
+        if not gateways:
             print_yellow("⚠️ Solo il proprio gateway trovato, nessun peer disponibile")
             return
         
-        for i, gw in enumerate(filtered, 1):
+        # 🔥 MOSTRA LISTA CON INDIRIZZO COMPLETO
+        print_blue("🔍 Gateway disponibili:")
+        print(f"   Trovati {len(gateways)} gateway (escluso se stesso)")
+        for i, gw in enumerate(gateways, 1):
             name = gw.get('name', 'UNKNOWN')
             gw_id = gw.get('gateway_id', '?')
             hops = gw.get('hops', '?')
             rssi = gw.get('rssi')
             rssi_str = f" RSSI:{rssi:.1f}dBm" if rssi is not None else ""
-            print(f"   {i}) {name} ({gw_id[:16]}...) Hops:{hops}{rssi_str}")
+            print(f"   {i}) {name} ({gw_id}) Hops:{hops}{rssi_str}")
         
         try:
-            choice = int(input("\nScegli gateway (numero): ").strip())
-            if 1 <= choice <= len(filtered):
-                gateway_id = filtered[choice - 1].get('gateway_id')
+            choice = input("\nScegli gateway (numero): ").strip()
+            if not choice:
+                return
+            
+            idx = int(choice) - 1
+            if 0 <= idx < len(gateways):
+                gateway_id = gateways[idx].get('gateway_id')
                 if gateway_id:
-                    print_blue(f"📡 Richiedo info a {gateway_id[:16]}...")
-                    success = self.metrics.request_gateway_info(gateway_id)
-                    if success:
-                        print_green("✅ Richiesta inviata e risposta ricevuta!")
-                        # ============================================================
-                        # MOSTRA SOLO IL PEER APPENA INTERROGATO!
-                        # ============================================================
-                        self._show_single_peer(gateway_id)
+                    print_blue(f"📡 Richiedo info a {gateway_id}")
+                    result = self.backend.request_gateway_info(gateway_id)
+                    
+                    if result.get("success"):
+                        peer = result.get("peer")
+                        if peer:
+                            self.backend._show_single_peer(peer)
+                        else:
+                            print_green("✅ Richiesta inviata e risposta ricevuta!")
                     else:
-                        print_red("❌ Errore nella richiesta (vedi log sopra)")
+                        print_red(f"❌ {result.get('message', 'Errore')}")
+                else:
+                    print_red("❌ Gateway ID non valido")
             else:
                 print_red("❌ Scelta non valida")
         except ValueError:
             print_red("❌ Inserisci un numero valido")
-
-
-    def _show_single_peer(self, gateway_id: str):
-        """Mostra un singolo peer in formato tabella"""
-        if not self.metrics:
-            print_red("❌ Metriche non disponibili")
+    
+    def _cmd_send_reticulum(self):
+        """Invia transazione via Reticulum"""
+        to_addr = input("Indirizzo destinatario: ").strip()
+        if not to_addr:
+            return
+        try:
+            amount = float(input("Ammontare: ").strip())
+        except ValueError:
+            print_red("❌ Ammontare non valido")
+            return
+        asset = input("Asset (XRP): ").strip() or "XRP"
+        
+        result = self.backend.send_via_reticulum(to_addr, amount, asset)
+        if result.get("success"):
+            print_green(f"✅ Transazione inviata via Reticulum!")
+            print(f"   Hash: {result.get('hash', 'N/A')}")
+        else:
+            print_red(f"❌ {result.get('message', 'Errore')}")
+    
+    def _cmd_test_gateways(self):
+        """Testa tutti i gateway attivi"""
+        print("\n📡 Test di tutti i gateway attivi in corso...")
+        print("   Questo aggiornerà i dati dei peer nel database.")
+        print("   Per vedere la classifica, usa '6) Peer metriche'.\n")
+        
+        result = self.backend.test_all_gateways()
+        
+        if not result.get("success"):
+            print_red(f"❌ {result.get('message', 'Errore')}")
             return
         
-        peers = self.metrics.get_all_peers()
-        peer = None
-        for p in peers:
-            if p.get('gateway_id') == gateway_id:
-                peer = p
-                break
+        results = result.get("results", [])
         
-        if not peer:
-            print_yellow("⚠️ Peer non trovato nel database")
+        if not results:
+            print_yellow("⚠️ Nessun gateway attivo trovato")
             return
         
-        # Mostra in formato tabella (stile _reticulum_peers ma per un solo peer)
-        print_bold(f"\n🔍 PEER: {peer.get('name', 'UNKNOWN')}")
-        print("=" * 120)
-        print(f"{'ID':<38} {'Hops':<6} {'RTT':<10} {'XRP':<14} {'Stellar':<14} {'Rep':<5} {'Internet':<9} {'Ultimo visto':<15}")
-        print("-" * 120)
+        print_bold(f"\n📊 TEST COMPLETATO")
+        print("=" * 60)
+        print(f"   Gateway testati: {result.get('count', 0)}")
+        print(f"   Risposte ricevute: {result.get('successful', 0)}")
+        print("=" * 60)
         
-        gid = str(peer.get('gateway_id', 'N/A'))
-        hops = peer.get('hops', '?')
-        hops_str = str(hops) if hops is not None else '?'
+        # Tabella semplice
+        print("\n📋 RISULTATI:")
+        print("-" * 80)
+        print(f"{'#':<3} {'Nome':<20} {'Stato':<12} {'Hops':<6}")
+        print("-" * 80)
         
-        latency = peer.get('latency_ms')
-        latency_str = f"{latency}ms" if latency is not None else '?ms'
+        for idx, r in enumerate(results, 1):
+            print(f"{idx:<3} {r.get('name', 'UNKNOWN'):<20} {r.get('status', '?'):<12} {r.get('hops', '?'):<6}")
         
-        xrp_reachable = peer.get('xrp_reachable', False)
-        xrp_latency = peer.get('xrp_latency_ms')
-        if xrp_reachable and xrp_latency:
-            xrp_str = f"✅{xrp_latency}ms"
-        elif xrp_reachable:
-            xrp_str = "✅ OK"
-        else:
-            xrp_str = "❌"
-        
-        stellar_reachable = peer.get('stellar_reachable', False)
-        stellar_latency = peer.get('stellar_latency_ms')
-        if stellar_reachable and stellar_latency:
-            stellar_str = f"✅{stellar_latency}ms"
-        elif stellar_reachable:
-            stellar_str = "✅ OK"
-        else:
-            stellar_str = "❌"
-        
-        rep = str(peer.get('reputation', 50))
-        internet_icon = "🌐" if peer.get('has_internet', False) else "📡"
-        
-        last_seen = peer.get('last_seen')
-        last_seen_str = self._format_time_ago(last_seen)
-        
-        print(f"{gid:<38} {hops_str:<6} {latency_str:<10} {xrp_str:<14} {stellar_str:<14} {rep:<5} {internet_icon:<9} {last_seen_str:<15}")
-        print("=" * 120)
-        
-        # Mostra anche gli Assets
-        assets = peer.get('assets', [])
-        if isinstance(assets, list) and assets:
-            print(f"   Assets: {', '.join(assets)}")
-        
-        # Mostra Fee
-        fee = peer.get('fee', 'N/A')
-        fee_asset = peer.get('fee_asset', '')
-        if fee != 'N/A':
-            print(f"   Fee: {fee} {fee_asset}")
+        print("-" * 80)
+        print_green("\n✅ Dati aggiornati! Usa '6) Peer metriche' per vedere la classifica completa.")
 
-
-# ============================================================
-# 6. MODALITÀ INTERATTIVA - VERSIONE DEFINITIVA
-# ============================================================
-
-def interactive_mode():
-    """Modalità interattiva con Reticulum sempre attivo"""
-    
-    # ============================================================
-    # 🔐 CHIEDE PASSWORD ALL'AVVIO - SEMPRE
-    # ============================================================
-    import getpass
-    
-    print("\n" + "=" * 60)
-    print("  🔐 PAX WALLET - UNLOCK")
-    print("=" * 60)
-    print("")
-    print("   Inserisci la password per sbloccare il wallet.")
-    print("   (Se è la prima volta, crea una nuova password)")
-    print("")
-    
-    while True:
-        password = getpass.getpass("🔐 Password: ")
-        if not password:
-            print_red("❌ La password non può essere vuota")
-            continue
+    def _cmd_remove_gateway(self):
+        """Rimuovi un gateway manualmente da announce_cache e gateway_peers"""
+        print("\n🗑️ RIMUOVI GATEWAY MANUALMENTE")
+        print("=" * 60)
+        print("   Questa operazione rimuove il gateway da:")
+        print("   - announce_cache.db (annunci)")
+        print("   - gateway_peers.db (metriche)")
+        print("")
         
-        confirm = getpass.getpass("   Conferma password: ")
-        if confirm != password:
-            print_red("❌ Le password non corrispondono")
-            continue
+        # Prima mostra la lista dei gateway disponibili
+        result = self.backend.discover_gateways(active_only=False)
+        if not result.get("success"):
+            print_red(f"❌ {result.get('message', 'Errore')}")
+            return
         
-        break
-    
-    cli = WalletCLI(password=password)
-    
-    # Passa la password al manager
-    if cli.wallet and cli.wallet._xrp_manager:
-        cli.wallet._xrp_manager._wallet_password = password
-    
-    cli.init()
-    cli._interactive_mode = True
-    
-    print_bold("\n" + "=" * 60)
-    print_bold("    💰 WALLET CLI - MODALITÀ INTERATTIVA")
-    print_bold("=" * 60)
-    print("")
-    print_green("📡 Reticulum attivo per tutta la sessione")
-    print_green("🔐 Wallet cifrato con AES-256-GCM")
-    
-    try:
-        while True:
-            print("\n" + "-" * 40)
-            print("  1) Wallet")
-            print("  2) Mostra saldo")
-            print("  3) Mostra indirizzo")
-            print("  4) Deriva indirizzi")
-            print("  5) Invia pagamento")
-            print("  6) Info wallet")
-            print("  7) Storico")
-            print("  8) Fund testnet (XLM)")
-            print("  9) Esporta")
-            print(" 10) Trustline")
-            print(" 11) Invia token")
-            print(" 12) Reticulum")
-            print(" 13) Cambia password")
-            print("  0) Esci")
-            
-            # Mostra stato Reticulum
-            if cli.reticulum:
-                status = cli.reticulum.get_status()
-                if status.get('is_gateway', False):
-                    print_yellow(f"  📡 Gateway attivo (PID: {status.get('pid')})")
-                elif status.get('is_wallet', False):
-                    print_yellow(f"  📡 Wallet attivo (PID: {status.get('pid')})")
-                elif status.get('running', False):
-                    print_cyan("  📡 Reticulum attivo")
-                else:
-                    print_red("  ❌ Reticulum non attivo")
-            print("-" * 40)
-            
-            choice = input("\nScelta: ").strip()
-            
-            if choice == '0':
-                print_green("👋 Arrivederci!")
-                break
-            
-            # ============================================================
-            # 1) WALLET - SOTTOMENU
-            # ============================================================
-            elif choice == '1':
-                while True:
-                    # Mostra wallet attivo e lista
-                    active = cli._get_active_wallet_name()
-                    wallets = cli._get_wallet_list()
-                    
-                    print("\n" + "=" * 50)
-                    print("  📂 WALLET")
-                    print("=" * 50)
-                    print(f"  Wallet attivo: {active or 'NESSUNO'}")
-                    print("\n  📋 Lista wallet:")
-                    if wallets:
-                        for i, w in enumerate(wallets, 1):
-                            marker = "▶" if w["name"] == active else " "
-                            address = w.get('address', 'unknown')
-                            print(f"    {i}. {marker} {w['name']:<15} ({w.get('crypto', 'XRP')} - {w.get('network', 'testnet')}) {address}")
-                    else:
-                        print("    ❌ Nessun wallet salvato")
-                    
-                    print("\n" + "-" * 50)
-                    print("  1) Crea wallet")
-                    print("  2) Importa wallet")
-                    print("  3) Rimuovi wallet")
-                    print("  4) Cambia wallet")
-                    print("  0) Torna al menu principale")
-                    print("-" * 50)
-                    
-                    sub = input("\nScelta: ").strip()
-                    
-                    if sub == '0':
-                        break
-                    elif sub == '1':
-                        name = input("Nome (default): ").strip() or "default"
-                        crypto = input("Crypto (XRP/XLM): ").strip().upper() or "XRP"
-                        network = input("Rete (testnet/mainnet): ").strip().lower() or "testnet"
-                        cli.cmd_create(name, crypto, network)
-                    elif sub == '2':
-                        seed = input("Inserisci seed/mnemonic/numeri: ").strip()
-                        if seed:
-                            name = input("Nome (imported): ").strip() or "imported"
-                            crypto = input("Crypto (auto/XRP/XLM): ").strip().upper() or "auto"
-                            network = input("Rete (testnet/mainnet): ").strip().lower() or "testnet"
-                            cli.cmd_import(seed, name, crypto, network)
-                    elif sub == '3':
-                        cli.cmd_remove_wallet()
-                    elif sub == '4':
-                        name = input("Nome wallet: ").strip()
-                        if name:
-                            cli.cmd_switch(name)
-                    else:
-                        print_red("❌ Scelta non valida")
-            
-            # ============================================================
-            # 2) MOSTRA SALDO
-            # ============================================================
-            elif choice == '2':
-                cli.cmd_balance(True)
-            
-            # ============================================================
-            # 3) MOSTRA INDIRIZZO
-            # ============================================================
-            elif choice == '3':
-                cli.cmd_address()
-            
-            # ============================================================
-            # 4) DERIVA INDIRIZZI
-            # ============================================================
-            elif choice == '4':
-                keyword = input("Keyword (default): ").strip() or "default"
-                count = int(input("Numero (5): ").strip() or "5")
-                cli.cmd_derive(keyword, count)
-            
-            # ============================================================
-            # 5) INVIA PAGAMENTO
-            # ============================================================
-            elif choice == '5':
-                to_addr = input("Indirizzo destinatario: ").strip()
-                try:
-                    amount = float(input("Ammontare: ").strip())
-                except ValueError:
-                    print_red("❌ Ammontare non valido")
-                    continue
-                memo = input("Memo: ").strip()
-                if to_addr and amount > 0:
-                    cli.cmd_send(to_addr, amount, memo)
-                else:
-                    print_red("❌ Dati non validi")
-            
-            # ============================================================
-            # 6) INFO WALLET
-            # ============================================================
-            elif choice == '6':
-                cli.cmd_info()
-            
-            # ============================================================
-            # 7) STORICO
-            # ============================================================
-            elif choice == '7':
-                limit = int(input("Numero transazioni (10): ").strip() or "10")
-                cli.cmd_history(limit)
-            
-            # ============================================================
-            # 8) FUND TESTNET
-            # ============================================================
-            elif choice == '8':
-                cli.cmd_fund_testnet()
-            
-            # ============================================================
-            # 9) ESPORTA
-            # ============================================================
-            elif choice == '9':
-                private = input("Includi chiave privata? (s/N): ").strip().lower() == 's'
-                cli.cmd_export(private)
-            
-            # ============================================================
-            # 10) TRUSTLINE
-            # ============================================================
-            elif choice == '10':
-                print("\n🔗 GESTIONE TRUSTLINE")
-                print("  1) Mostra trustline")
-                print("  2) Crea trustline")
-                print("  3) Rimuovi trustline")
-                print("  4) Info trustline")
-                sub = input("Scelta: ").strip()
-                if sub == '1':
-                    cli.cmd_trustlines(["--refresh"])
-                elif sub == '2':
-                    asset = input("Asset (es. RLUSD): ").strip()
-                    issuer = input("Issuer address: ").strip()
-                    limit = input("Limite (0 per rimuovere): ").strip()
-                    args = [asset, issuer]
-                    if limit:
-                        args.append(limit)
-                    else:
-                        args.append("0")
-                    cli.cmd_trustline_set(args)
-                elif sub == '3':
-                    asset = input("Asset: ").strip()
-                    issuer = input("Issuer address: ").strip()
-                    cli.cmd_trustline_remove([asset, issuer])
-                elif sub == '4':
-                    asset = input("Asset: ").strip()
-                    issuer = input("Issuer (opzionale): ").strip()
-                    cli.cmd_trustline_info([asset] + ([issuer] if issuer else []))
-            
-            # ============================================================
-            # 11) INVIA TOKEN
-            # ============================================================
-            elif choice == '11':
-                to_addr = input("Indirizzo destinatario: ").strip()
-                token = input("Nome token (es. Arg0): ").strip()
-                try:
-                    amount = float(input("Ammontare: ").strip())
-                except ValueError:
-                    print_red("❌ Ammontare non valido")
-                    continue
-                issuer = input("Issuer (opzionale, invio per wallet corrente): ").strip()
-                if to_addr and token and amount:
-                    args = ["--to", to_addr, "--token", token, "--amount", str(amount)]
-                    if issuer:
-                        args += ["--issuer", issuer]
-                    cli.cmd_send_token(args)
-                else:
-                    print_red("❌ Dati non validi")
-            
-            # ============================================================
-            # 12) RETICULUM - SOTTOMENU
-            # ============================================================
-            elif choice == '12':
-                while True:
-                    print("\n" + "=" * 50)
-                    print("  📡 RETICULUM")
-                    print("=" * 50)
-                    
-                    if cli.reticulum:
-                        status = cli.reticulum.get_status()
-                        gw_status = "✅ Attivo" if status.get('is_gateway') else "❌ Fermo"
-                        peers = cli.metrics.get_all_peers() if cli.metrics else []
-                        print(f"\n  Gateway: {gw_status}")
-                        print(f"  Peer conosciuti: {len(peers)}")
-                    
-                    print("\n" + "-" * 50)
-                    print("  1) Stato gateway")
-                    print("  2) Avvia gateway")
-                    print("  3) Ferma gateway")
-                    print("  4) Scopri gateway")
-                    print("  5) Scopri wallet")
-                    print("  6) Peer metriche")
-                    print("  7) Miglior gateway")
-                    print("  8) Richiedi info gateway")
-                    print("  9) Invia transazione")
-                    print(" 10) Testa tutti i gateway")
-                    print("  0) Torna al menu principale")
-                    print("-" * 50)
-                    
-                    sub = input("\nScelta: ").strip()
-                    
-                    if sub == '0':
-                        break
-                    elif sub == '1':
-                        cli._reticulum_gateway_status()
-                    elif sub == '2':
-                        cli._reticulum_gateway_start()
-                    elif sub == '3':
-                        cli._reticulum_gateway_stop()
-                    elif sub == '4':
-                        cli._reticulum_discover()
-                    elif sub == '5':
-                        cli._reticulum_discover_wallets()
-                    elif sub == '6':
-                        cli._reticulum_peers()
-                    elif sub == '7':
-                        asset = input("Asset (es. RLUSD): ").strip()
-                        if asset:
-                            cli._reticulum_best_gateway(asset)
-                        else:
-                            print_red("❌ Specifica un asset")
-                    elif sub == '8':
-                        cli._reticulum_request_info()
-                    elif sub == '9':
-                        to_addr = input("Indirizzo destinatario: ").strip()
-                        if len(to_addr) < 20:
-                            print_red("❌ Indirizzo troppo corto (minimo 20 caratteri)")
-                        else:
-                            try:
-                                amount = float(input("Ammontare: ").strip())
-                                if amount <= 0:
-                                    print_red("❌ L'ammontare deve essere maggiore di 0")
-                                else:
-                                    asset = input("Asset (XRP): ").strip() or "XRP"
-                                    cli._reticulum_send(["--to", to_addr, "--amount", str(amount), "--asset", asset])
-                            except ValueError:
-                                print_red("❌ Ammontare non valido")
-                    elif sub == '10':
-                        cli.cmd_test_gateways()
-                    else:
-                        print_red("❌ Scelta non valida")
-            
-            # ============================================================
-            # 13) CAMBIA PASSWORD
-            # ============================================================
-            elif choice == '13':
-                import getpass
-                print("\n🔐 CAMBIA PASSWORD")
-                print("=" * 40)
-                old = getpass.getpass("Password attuale: ")
-                if old != cli._wallet_password:
-                    print_red("❌ Password errata")
-                else:
-                    new = getpass.getpass("Nuova password: ")
-                    confirm = getpass.getpass("Conferma password: ")
-                    if new != confirm:
-                        print_red("❌ Le password non corrispondono")
-                    else:
-                        cli._wallet_password = new
-                        if cli.wallet and cli.wallet._xrp_manager:
-                            cli.wallet._xrp_manager._wallet_password = new
-                        # Ricifra tutti i wallet
-                        wallets = cli._get_wallet_list()
-                        for w in wallets:
-                            wallet_file = cli.wallets_dir / f"{w['name']}.json"
-                            if wallet_file.exists():
-                                with open(wallet_file, 'r') as f:
-                                    content = f.read().strip()
-                                try:
-                                    data = cli._decrypt_data(content)
-                                    if data:
-                                        encrypted = cli._encrypt_data(data)
-                                        with open(wallet_file, 'w') as f:
-                                            f.write(encrypted)
-                                except:
-                                    pass
-                        print_green("✅ Password cambiata con successo!")
-            
+        gateways = result.get("gateways", [])
+        if not gateways:
+            print_yellow("⚠️ Nessun gateway trovato")
+            return
+        
+        print("📋 GATEWAY DISPONIBILI:")
+        print("-" * 80)
+        print(f"{'#':<4} {'Nome':<20} {'ID':<38} {'Last Seen'}")
+        print("-" * 80)
+        
+        for i, gw in enumerate(gateways, 1):
+            name = gw.get('name', 'UNKNOWN')[:18]
+            gw_id = gw.get('gateway_id', '?')
+            last_seen = gw.get('last_seen')
+            if last_seen:
+                last_str = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(last_seen))
             else:
-                print_red("❌ Scelta non valida")
-    
-    except KeyboardInterrupt:
-        print("\n")
-        print_yellow("⚠️ Interrotto dall'utente")
-    
-    finally:
-        # Ferma metriche
-        if hasattr(cli, 'metrics') and cli.metrics:
-            try:
-                cli.metrics.stop_query_loop()
-            except:
-                pass
+                last_str = 'Mai'
+            print(f"{i:<4} {name:<20} {gw_id:<38} {last_str}")
         
-        # Ferma gateway se attivo
-        if cli.reticulum:
-            status = cli.reticulum.get_status()
-            if status.get('is_gateway', False):
-                print("\n🛑 Fermando il gateway...")
-                cli.reticulum.stop_gateway()
-            print_green("👋 Arrivederci!")
+        print("-" * 80)
+        print("")
+        
+        choice = input("Numero gateway da rimuovere (o Invio per annullare): ").strip()
+        if not choice:
+            print_yellow("❌ Operazione annullata")
+            return
+        
+        try:
+            idx = int(choice) - 1
+            if idx < 0 or idx >= len(gateways):
+                print_red("❌ Numero non valido")
+                return
+            
+            gw = gateways[idx]
+            gw_id = gw.get('gateway_id')
+            name = gw.get('name', 'UNKNOWN')
+            
+            # Chiedi conferma
+            print(f"\n⚠️ Stai per rimuovere: {name} ({gw_id[:16]}...)")
+            confirm = input("   Confermi? (s/N): ").strip().lower()
+            if confirm != 's':
+                print_yellow("❌ Operazione annullata")
+                return
+            
+            # Esegui la rimozione
+            result = self.backend.remove_gateway(gw_id)
+            if result.get("success"):
+                print_green(f"✅ {result.get('message', 'Rimosso con successo')}")
+                if result.get("removed_from_announce"):
+                    print("   ✅ Rimosso da announce_cache.db")
+                if result.get("removed_from_peers"):
+                    print("   ✅ Rimosso da gateway_peers.db")
+            else:
+                print_red(f"❌ {result.get('message', 'Errore')}")
+                
+        except ValueError:
+            print_red("❌ Inserisci un numero valido")
 
+    def _cmd_toggle_internet(self):
+        """Toggle uso internet / reticulum"""
+        current = self.backend.use_internet
+        self.backend.set_use_internet(not current)
+        if current:
+            print_green("🌐 Modalità Internet disattivata")
+            print_yellow("   Le operazioni useranno Reticulum (se disponibile)")
+        else:
+            print_green("🌐 Modalità Internet attivata")
+            print_yellow("   Le operazioni useranno connessione diretta")
 
 # ============================================================
-# 5. MAIN
+# MAIN
 # ============================================================
 
 def main():
-    import argparse
-    
-    parser = argparse.ArgumentParser(
-        description="Wallet CLI - Gestione wallet XRP/XLM",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-ESEMPI:
-  # Modalità interattiva (RACCOMANDATA per Reticulum)
-  python wallet_cli.py interactive
-  
-  # Creazione
-  python wallet_cli.py create --name mio_wallet --crypto XRP --network testnet
-  
-  # Importa mnemonica
-  python wallet_cli.py import --seed "abandon abandon ..." --name mio_wallet
-  
-  # Saldo
-  python wallet_cli.py balance
-  
-  # Info
-  python wallet_cli.py info
-  
-  # Storico
-  python wallet_cli.py history --limit 10
-  
-  # Invia XRP
-  python wallet_cli.py send --to r... --amount 1.5 --memo "test"
-  
-  # Invia Token
-  python wallet_cli.py send-token --to r... --token Arg0 --amount 1000
-  
-  # Ricevi Token
-  python wallet_cli.py receive-token --token Arg0 --issuer r... --limit 1000000
-  
-  # Lista wallet
-  python wallet_cli.py list-wallets
-  
-  # Cambia wallet
-  python wallet_cli.py switch mio_wallet
-  
-  # Trustline
-  python wallet_cli.py trustlines --refresh
-  python wallet_cli.py trustline-set RLUSD rHb9CJAWyB4rj91VRwn96DkukG4bwdtyth 10000
-        """
-    )
-    
-    subparsers = parser.add_subparsers(dest='command', help='Comandi disponibili')
-    
-    create_parser = subparsers.add_parser('create', help='Crea un nuovo wallet')
-    create_parser.add_argument('--name', default='default', help='Nome wallet')
-    create_parser.add_argument('--crypto', default='XRP', choices=['XRP', 'XLM'], help='Crypto')
-    create_parser.add_argument('--network', default='testnet', choices=['testnet', 'mainnet', 'devnet'], help='Rete')
-    
-    import_parser = subparsers.add_parser('import', help='Importa un wallet')
-    import_parser.add_argument('--seed', required=True, help='Seed, mnemonic o numeri Xaman')
-    import_parser.add_argument('--name', default='imported', help='Nome wallet')
-    import_parser.add_argument('--crypto', default='auto', choices=['auto', 'XRP', 'XLM'], help='Crypto')
-    import_parser.add_argument('--network', default='testnet', choices=['testnet', 'mainnet', 'devnet'], help='Rete')
-    
-    balance_parser = subparsers.add_parser('balance', help='Mostra saldo')
-    balance_parser.add_argument('--refresh', action='store_true', help='Forza refresh')
-    
-    subparsers.add_parser('address', help='Mostra indirizzo')
-    
-    derive_parser = subparsers.add_parser('derive', help='Deriva indirizzi')
-    derive_parser.add_argument('--keyword', default='default', help='Keyword derivazione')
-    derive_parser.add_argument('--count', type=int, default=5, help='Numero indirizzi')
-    
-    send_parser = subparsers.add_parser('send', help='Invia pagamento')
-    send_parser.add_argument('--to', required=True, help='Indirizzo destinatario')
-    send_parser.add_argument('--amount', required=True, type=float, help='Ammontare')
-    send_parser.add_argument('--memo', default='', help='Memo')
-    
-    subparsers.add_parser('info', help='Mostra info wallet')
-    
-    history_parser = subparsers.add_parser('history', help='Mostra storico')
-    history_parser.add_argument('--limit', type=int, default=10, help='Numero transazioni')
-    
-    subparsers.add_parser('fund', help='Fonda wallet su testnet (solo XLM)')
-    
-    export_parser = subparsers.add_parser('export', help='Esporta wallet')
-    export_parser.add_argument('--private', action='store_true', help='Includi chiave privata')
-    
-    subparsers.add_parser('list-wallets', help='Lista tutti i wallet salvati')
-    
-    switch_parser = subparsers.add_parser('switch', help='Cambia wallet attivo')
-    switch_parser.add_argument('name', help='Nome wallet')
-    
-    wallet_parser = subparsers.add_parser('wallet', help='Crea o cambia wallet')
-    wallet_parser.add_argument('name', nargs='?', default=None, help='Nome wallet')
-    
-    subparsers.add_parser('interactive', help='Modalità interattiva')
-    
-    # ============================================================
-    # TRUSTLINE - COMANDI
-    # ============================================================
+    """Entry point"""
+    cli = PaxWalletCLI()
+    cli.run()
 
-    trustlines_parser = subparsers.add_parser('trustlines', help='Mostra trustline')
-    trustlines_parser.add_argument('--refresh', '-r', action='store_true', help='Forza refresh')
-
-    trustline_set_parser = subparsers.add_parser('trustline-set', help='Crea trustline')
-    trustline_set_parser.add_argument('asset', help='Asset code (es. RLUSD)')
-    trustline_set_parser.add_argument('issuer', help='Issuer address')
-    trustline_set_parser.add_argument('limit', nargs='?', type=float, default=0, help='Limite (default: 0 = rimuovi)')
-
-    trustline_remove_parser = subparsers.add_parser('trustline-remove', help='Rimuovi trustline')
-    trustline_remove_parser.add_argument('asset', help='Asset code')
-    trustline_remove_parser.add_argument('issuer', help='Issuer address')
-
-    trustline_info_parser = subparsers.add_parser('trustline-info', help='Info trustline')
-    trustline_info_parser.add_argument('asset', help='Asset code')
-    trustline_info_parser.add_argument('issuer', nargs='?', help='Issuer address (opzionale)')
-
-    # ============================================================
-    # TOKEN - COMANDI
-    # ============================================================
-
-    send_token_parser = subparsers.add_parser('send-token', help='Invia un token (non XRP)')
-    send_token_parser.add_argument('--to', required=True, help='Indirizzo destinatario')
-    send_token_parser.add_argument('--token', required=True, help='Nome del token (es. Arg0)')
-    send_token_parser.add_argument('--amount', required=True, type=float, help='Quantità da inviare')
-    send_token_parser.add_argument('--issuer', help='Issuer del token (default: wallet corrente)')
-
-    receive_token_parser = subparsers.add_parser('receive-token', help='Prepara la ricezione di un token')
-    receive_token_parser.add_argument('--token', required=True, help='Nome del token')
-    receive_token_parser.add_argument('--issuer', required=True, help='Indirizzo dell\'emettitore')
-    receive_token_parser.add_argument('--limit', type=float, default=1000000.0, help='Limite massimo')
-
-    # ============================================================
-    # RETICULUM - COMANDI (RIMOSSI PERCHÉ USARE INTERACTIVE)
-    # ============================================================
-    # I comandi Reticulum da CLI non sono più supportati
-    # Usa la modalità interattiva: python wallet_cli.py interactive
-    
-    args, unknown = parser.parse_known_args()
-    
-    cli = WalletCLI()
-    
-    if args.command == 'interactive':
-        interactive_mode()
-    
-    elif args.command == 'create':
-        cli.cmd_create(args.name, args.crypto, args.network)
-    
-    elif args.command == 'import':
-        cli.cmd_import(args.seed, args.name, args.crypto, args.network)
-    
-    elif args.command == 'balance':
-        cli.init()
-        cli.cmd_balance(args.refresh)
-    
-    elif args.command == 'address':
-        cli.init()
-        cli.cmd_address()
-    
-    elif args.command == 'derive':
-        cli.init()
-        cli.cmd_derive(args.keyword, args.count)
-    
-    elif args.command == 'send':
-        cli.init()
-        cli.cmd_send(args.to, args.amount, args.memo)
-    
-    elif args.command == 'info':
-        cli.init()
-        cli.cmd_info()
-    
-    elif args.command == 'history':
-        cli.init()
-        cli.cmd_history(args.limit)
-    
-    elif args.command == 'fund':
-        cli.init()
-        cli.cmd_fund_testnet()
-    
-    elif args.command == 'export':
-        cli.init()
-        cli.cmd_export(args.private)
-    
-    elif args.command == 'list-wallets':
-        cli.init()
-        cli.cmd_list_wallets()
-    
-    elif args.command == 'switch':
-        cli.init()
-        cli.cmd_switch(args.name)
-    
-    elif args.command == 'wallet':
-        cli.init()
-        if args.name:
-            cli.cmd_wallet([args.name])
-        else:
-            cli.cmd_wallet([])
-    
-    elif args.command == 'trustlines':
-        cli.init()
-        cli.cmd_trustlines(sys.argv[2:])
-
-    elif args.command == 'trustline-set':
-        cli.init()
-        args_list = [args.asset, args.issuer]
-        if args.limit is not None:
-            args_list.append(str(args.limit))
-        cli.cmd_trustline_set(args_list)
-
-    elif args.command == 'trustline-remove':
-        cli.init()
-        cli.cmd_trustline_remove([args.asset, args.issuer])
-
-    elif args.command == 'trustline-info':
-        cli.init()
-        cli.cmd_trustline_info([args.asset] + ([args.issuer] if args.issuer else []))
-
-    elif args.command == 'send-token':
-        cli.init()
-        cli.cmd_send_token(sys.argv[2:])
-
-    elif args.command == 'receive-token':
-        cli.init()
-        cli.cmd_receive_token(sys.argv[2:])
-    
-    else:
-        parser.print_help()
-
-
-# ============================================================
-# 7. ENTRY POINT
-# ============================================================
 
 if __name__ == "__main__":
-    import sys
-    # Se nessun argomento o solo "interactive"
-    if len(sys.argv) == 1:
-        sys.argv.append("interactive")
     main()

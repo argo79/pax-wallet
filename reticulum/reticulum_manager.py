@@ -15,10 +15,8 @@ except ImportError:
     try:
         from RNS import Interface
     except ImportError:
-        # Se proprio non c'è, crea una classe fittizia
         class Interface:
             pass
-        # Forza l'import in RNS
         if not hasattr(RNS, 'Interface'):
             setattr(RNS, 'Interface', Interface)
         if not hasattr(RNS, 'Interfaces'):
@@ -27,7 +25,6 @@ except ImportError:
             RNS.Interfaces = Interfaces
         setattr(RNS.Interfaces, 'Interface', Interface)
 
-# Forza il caricamento di Reticulum
 try:
     RNS.Reticulum
 except:
@@ -43,7 +40,8 @@ import subprocess
 import re
 from pathlib import Path
 from typing import Optional, Dict, Any, List
-
+from datetime import datetime
+from io import BytesIO
 from .announce_cache import AnnounceCache
 
 
@@ -55,7 +53,6 @@ class ReticulumConfig:
         self.aspect2 = "gateway"
         self.full_aspect = f"{self.app_name}.{self.aspect1}.{self.aspect2}"
         
-        # Valori di default
         self.announce_interval = 60
         self.gateway_name = "Gateway"
         self.wallet_name = "Wallet"
@@ -72,7 +69,6 @@ class ReticulumConfig:
         self.background = False
         self.discover_since_seconds = 86400
 
-        # Carica da file se esiste
         self._load_config(config_path)
     
     def _load_config(self, config_path: Path):
@@ -107,10 +103,6 @@ class ReticulumConfig:
             except Exception as e:
                 print(f"⚠️ Errore caricamento config: {e}")
 
-
-# ============================================================
-# HANDLER - RICEVE ANNUNCI
-# ============================================================
 
 class AnnounceHandler:
     def __init__(self, aspect_filter=None):
@@ -193,21 +185,20 @@ class AnnounceHandler:
                 if interface:
                     parts.append(f"IFACE:{interface[:20]}")
                 
-                print(f"📢 GATEWAY: {name} ({peer_hash}) {' '.join(parts)}")
+                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 📢 GATEWAY: {name} ({peer_hash}) {' '.join(parts)}")
                 
             elif self.aspect_filter == "rns.rec.wallet":
                 self.sqlite_cache.add_wallet_announce(
                     wallet_id=peer_hash,
                     name=name,
                     identity_hash=identity_hash,
-                    hops=hops,           # <-- AGGIUNTO!
-                    interface=interface, # <-- AGGIUNTO!
-                    rssi=rssi,           # <-- AGGIUNTO!
-                    snr=snr,             # <-- AGGIUNTO!
-                    quality=quality      # <-- AGGIUNTO!
+                    hops=hops,
+                    interface=interface,
+                    rssi=rssi,
+                    snr=snr,
+                    quality=quality
                 )
                 
-                # Stampa con TUTTI i campi
                 parts = []
                 if hops is not None:
                     parts.append(f"Hops:{hops}")
@@ -218,7 +209,7 @@ class AnnounceHandler:
                 if snr is not None:
                     parts.append(f"SNR:{snr}dB")
                 
-                print(f"📢 WALLET: {name} ({peer_hash}) {' '.join(parts)}")
+                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 📢 WALLET: {name} ({peer_hash}) {' '.join(parts)}")
             else:
                 print(f"📢 ANNUNCIO: {name} ({peer_hash})")
     
@@ -231,21 +222,19 @@ class AnnounceHandler:
             return len(self.cache)
 
 
-# ============================================================
-# SERVER HANDLER - GESTISCE RICHIESTE VIA LINK
-# ============================================================
-
 class GatewayServerHandler:
-    def __init__(self, identity, metrics, gateway_dest):
+    def __init__(self, identity, metrics, gateway_dest, gateway_id=None):
         self.identity = identity
         self.metrics = metrics
         self.gateway_dest = gateway_dest
+        self._my_gateway_id = gateway_id
         self.latest_link = None
         self._active_links = []
         self._lock = threading.Lock()
         self._running = False
         self._link_latency = {}
         self._link_hops = {}
+        self._pending_resources = {}
     
     def start(self):
         self._running = True
@@ -285,6 +274,7 @@ class GatewayServerHandler:
                 print(f"📊 Hops: {link.hops}")
         
         link.set_packet_callback(self._handle_packet)
+        link.set_resource_strategy(RNS.Link.ACCEPT_NONE)
         link.set_link_closed_callback(self._on_link_closed)
     
     def _on_link_closed(self, link):
@@ -309,21 +299,56 @@ class GatewayServerHandler:
     
     def _handle_packet(self, message, packet):
         print(f"📥 Pacchetto ricevuto")
+        data = None
         try:
             data = json.loads(message.decode())
-            if data.get("type") == "info_request":
-                response = self.metrics.process_info_request({})
+            
+            # GESTISCI RICHIESTE LEDGER RELAY
+            if data.get("type") == "ledger_relay":
+                print(f"📥 Richiesta ledger_relay: {data.get('operation')}")
+                response = self._process_ledger_relay(data)
                 if response:
-                    Packet(packet.link, response.encode()).send()
-                    print("📤 Risposta inviata")
+                    response_data = {
+                        "type": "ledger_relay_response",
+                        "version": "1.0",
+                        "operation": data.get("operation"),
+                        "success": response.get("success", False),
+                        "result": response.get("result", {}),
+                        "error": response.get("error"),
+                        "timestamp": int(time.time()),
+                        "gateway_id": self._my_gateway_id
+                    }
                     
-                    if packet and hasattr(packet, 'link') and packet.link:
-                        try:
-                            time.sleep(0.1)
-                            packet.link.teardown()
-                            print("🔗 Link chiuso dopo risposta inviata")
-                        except Exception as e:
-                            print(f"⚠️ Errore chiusura link: {e}")
+                    response_bytes = json.dumps(response_data).encode()
+                    
+                    # SE I DATI SONO PICCOLI, USA PACCHETTO
+                    if len(response_bytes) <= RNS.Link.MDU:
+                        Packet(packet.link, response_bytes).send()
+                        print(f"📤 Risposta ledger_relay inviata ({len(response_bytes)} bytes)")
+                    else:
+                        # DATI GRANDI: USA RESOURCE
+                        print(f"📤 Risposta ledger_relay grande ({len(response_bytes)} bytes), uso Resource...")
+                        self._send_response_as_resource(packet.link, response_bytes)
+                return
+            
+            # GESTISCI RICHIESTE INFO
+            if data.get("type") == "info_request":
+                if self.metrics:
+                    response = self.metrics.process_info_request(data)
+                    if response:
+                        Packet(packet.link, response.encode()).send()
+                        print("📤 Risposta info inviata")
+                        if packet and hasattr(packet, 'link') and packet.link:
+                            try:
+                                time.sleep(0.1)
+                                packet.link.teardown()
+                                print("🔗 Link chiuso dopo risposta inviata")
+                            except Exception as e:
+                                print(f"⚠️ Errore chiusura link: {e}")
+                return
+            
+            print(f"📥 Tipo pacchetto sconosciuto: {data.get('type')}")
+            
         except json.JSONDecodeError:
             print("⚠️ Pacchetto non JSON valido")
         except UnicodeDecodeError:
@@ -331,18 +356,256 @@ class GatewayServerHandler:
         except Exception as e:
             print(f"⚠️ Errore elaborazione pacchetto: {e}")
         finally:
+            # NON CHIUDERE IL LINK PER LEDGER_RELAY
             if packet and hasattr(packet, 'link') and packet.link:
                 try:
                     if packet.link.is_established():
-                        packet.link.teardown()
-                        print("🔗 Link chiuso (cleanup finale)")
+                        is_ledger_relay = False
+                        try:
+                            if data and data.get("type") == "ledger_relay":
+                                is_ledger_relay = True
+                        except:
+                            pass
+                        
+                        if not is_ledger_relay:
+                            packet.link.teardown()
+                            print("🔗 Link chiuso (cleanup finale)")
                 except:
                     pass
+    
+    def _send_response_as_resource(self, link, data: bytes):
+        """Invia dati grandi come Resource usando un file temporaneo"""
+        import tempfile
+        
+        try:
+            # Crea un file temporaneo reale
+            with tempfile.NamedTemporaryFile(mode='wb', suffix='.json', delete=False) as tmp:
+                tmp.write(data)
+                tmp_path = tmp.name
+            
+            # Aprilo come file reale
+            file_obj = open(tmp_path, 'rb')
+            
+            # Crea il resource
+            resource = RNS.Resource(
+                file_obj,
+                link,
+                callback=lambda r: self._resource_sent_callback(r, tmp_path)
+            )
+            resource.data_size = len(data)
+            
+            print(f"📤 Resource in invio ({len(data)} bytes, file: {tmp_path})")
+            
+        except Exception as e:
+            print(f"⚠️ Errore invio resource: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def _resource_sent_callback(self, resource, tmp_path=None):
+        """Callback quando il resource è stato inviato"""
+        # Pulisci il file temporaneo
+        if tmp_path:
+            try:
+                if os.path.exists(tmp_path):
+                    os.unlink(tmp_path)
+                    print(f"🗑️ File temporaneo rimosso: {tmp_path}")
+            except Exception as e:
+                print(f"⚠️ Errore rimozione file: {e}")
+        
+        if resource.status == RNS.Resource.COMPLETE:
+            print("✅ Resource inviato con successo")
+        else:
+            print(f"❌ Invio resource fallito: {resource.status}")
+    
+    def _handle_submit_transaction(self, payload: Dict) -> Dict:
+        """
+        Riceve un blob firmato (hex) e lo invia al ledger XRP.
+        Supporta mainnet e testnet.
+        """
+        tx_blob = payload.get("tx_blob")
+        network = payload.get("network", "mainnet")
+        
+        if not tx_blob:
+            return {"error": "tx_blob mancante"}
+        
+        try:
+            from xrpl.transaction import submit_and_wait
+            from xrpl.clients import JsonRpcClient
+            import binascii
+            
+            # Decodifica il blob da hex a bytes
+            blob_bytes = binascii.unhexlify(tx_blob)
+            
+            # Scegli l'URL in base al network
+            urls = {
+                "mainnet": "https://s1.ripple.com:51234/",
+                "testnet": "https://s.altnet.rippletest.net:51234/",
+                "devnet": "https://s.devnet.rippletest.net:51234/"
+            }
+            client = JsonRpcClient(urls.get(network, urls["mainnet"]))
+            
+            # Invia la transazione
+            response = submit_and_wait(blob_bytes, client)
+            
+            # Estrai i risultati
+            tx_hash = response.result.get("hash", "unknown")
+            result_code = response.result.get('meta', {}).get('TransactionResult', 'unknown')
+            ledger = response.result.get("ledger_index")
+            
+            return {
+                "hash": tx_hash,
+                "result_code": result_code,
+                "ledger": ledger,
+                "network": network
+            }
+            
+        except Exception as e:
+            return {"error": str(e)}
+        
+    # ============================================================
+    # METODI PER LEDGER RELAY
+    # ============================================================
+    
+    def _process_ledger_relay(self, request: Dict) -> Dict:
+        operation = request.get("operation")
+        payload = request.get("payload", {})
+        
+        if operation == "get_balance":
+            result = self._handle_get_balance(payload)
+        elif operation == "get_history":
+            result = self._handle_get_history(payload)
+        elif operation == "submit_transaction":   # <-- AGGIUNGI QUESTO
+            result = self._handle_submit_transaction(payload)
+        elif operation == "send_payment":
+            result = self._handle_send_payment(payload)
+        else:
+            return {"success": False, "error": f"Operazione non supportata: {operation}"}
+        
+        if result.get("error"):
+            return {"success": False, "error": result["error"]}
+        
+        return {"success": True, "result": result}
+    
+    def _handle_get_balance(self, payload: Dict) -> Dict:
+        address = payload.get("address")
+        crypto = payload.get("crypto", "XRP")
+        
+        if not address:
+            return {"error": "Indirizzo mancante"}
+        
+        try:
+            if crypto == "XRP":
+                from xrpl.account import get_balance
+                from xrpl.clients import JsonRpcClient
+                
+                client = JsonRpcClient("https://s1.ripple.com:51234/")
+                balance_drops = get_balance(address, client)
+                balance = balance_drops / 1_000_000
+                return {"balance": balance, "crypto": "XRP"}
+            
+            elif crypto == "XLM":
+                try:
+                    from stellar_sdk import Server
+                    server = Server("https://horizon.stellar.org")
+                    account = server.accounts().account_id(address).call()
+                    for balance_data in account.get('balances', []):
+                        if balance_data['asset_type'] == 'native':
+                            return {"balance": float(balance_data['balance']), "crypto": "XLM"}
+                    return {"balance": 0.0, "crypto": "XLM"}
+                except ImportError:
+                    return {"error": "Stellar SDK non disponibile"}
+            
+            return {"error": f"Crypto non supportata: {crypto}"}
+            
+        except Exception as e:
+            return {"error": str(e)}
+    
+    def _handle_get_history(self, payload: Dict) -> Dict:
+        address = payload.get("address")
+        crypto = payload.get("crypto", "XRP")
+        network = payload.get("network", "mainnet")
+        limit = payload.get("limit", 10)
+        
+        if not address:
+            return {"error": "Indirizzo mancante"}
+        
+        try:
+            if crypto == "XRP":
+                from xrpl.models.requests import AccountTx
+                from xrpl.models.response import ResponseStatus
+                from xrpl.clients import JsonRpcClient
+                
+                urls = {
+                    "mainnet": "https://s1.ripple.com:51234/",
+                    "testnet": "https://s.altnet.rippletest.net:51234/",
+                    "devnet": "https://s.devnet.rippletest.net:51234/"
+                }
+                client = JsonRpcClient(urls.get(network, urls["mainnet"]))
+                request = AccountTx(
+                    account=address,
+                    ledger_index_min=-1,
+                    ledger_index_max=-1,
+                    limit=limit,
+                    forward=False
+                )
+                response = client.request(request)
+                
+                if response.status != ResponseStatus.SUCCESS:
+                    return {"error": str(response.status)}
+                
+                transactions = response.result.get("transactions", [])
+                return {
+                    "transactions": transactions,
+                    "count": len(transactions)
+                }
+            
+            elif crypto == "XLM":
+                try:
+                    import requests
+                    if network == "mainnet":
+                        horizon = "https://horizon.stellar.org"
+                    else:
+                        horizon = "https://horizon-testnet.stellar.org"
+                    
+                    url = f"{horizon}/accounts/{address}/transactions?limit={limit}&order=desc"
+                    response = requests.get(url, timeout=30)
+                    
+                    if response.status_code != 200:
+                        return {"error": f"Horizon error: {response.status_code}"}
+                    
+                    data = response.json()
+                    transactions = data.get('_embedded', {}).get('records', [])
+                    return {
+                        "transactions": transactions,
+                        "count": len(transactions)
+                    }
+                except ImportError:
+                    return {"error": "Requests non disponibile"}
+            
+            return {"error": f"Crypto non supportata: {crypto}"}
+            
+        except Exception as e:
+            return {"error": str(e)}
+    
+    def _handle_send_payment(self, payload: Dict) -> Dict:
+        tx_blob = payload.get("tx_blob")
+        if not tx_blob:
+            return {"error": "tx_blob mancante"}
+        
+        try:
+            from xrpl.transaction import submit_and_wait
+            from xrpl.clients import JsonRpcClient
+            
+            client = JsonRpcClient("https://s1.ripple.com:51234/")
+            response = submit_and_wait(tx_blob, client)
+            
+            return {
+                "tx_hash": response.result.get("hash"),
+                "ledger": response.result.get("ledger_index")
+            }
+        except Exception as e:
+            return {"error": str(e)}
 
-
-# ============================================================
-# RETICULUM MANAGER
-# ============================================================
 
 class ReticulumManager:
     _instance = None
@@ -431,7 +694,6 @@ class ReticulumManager:
             "timestamp": int(time.time())
         }
         
-        # Check XRP
         try:
             start = time.time()
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -454,7 +716,6 @@ class ReticulumManager:
             except:
                 pass
         
-        # Check Stellar
         try:
             start = time.time()
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -490,17 +751,9 @@ class ReticulumManager:
         
         return self._ledger_cache["data"]
 
-    # ============================================================
-    # SET METRICS
-    # ============================================================
-
     def set_metrics(self, metrics):
         self.metrics = metrics
         print("📡 Metrics impostate")
-
-    # ============================================================
-    # INIT
-    # ============================================================
 
     def init(self):
         if ReticulumManager._reticulum is not None:
@@ -520,17 +773,13 @@ class ReticulumManager:
         
         print("📡 Gateway in attesa di avvio. Usa 'Avvia gateway'.")
 
-    # ============================================================
-    # GATEWAY
-    # ============================================================
-
     def _announce_loop(self):
         while self.is_gateway:
             time.sleep(self.config.announce_interval)
             if self.is_gateway and self.gateway_dest:
                 try:
                     self.gateway_dest.announce(app_data=self.config.gateway_name.encode("utf-8"))
-                    print(f"📢 Gateway annunciato: {self.config.gateway_name}")
+                    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 📢 Gateway annunciato: {self.config.gateway_name}")
                 except Exception as e:
                     print(f"⚠️ Errore announce: {e}")
 
@@ -577,7 +826,8 @@ class ReticulumManager:
             ReticulumManager._server_handler = GatewayServerHandler(
                 self.identity, 
                 self.metrics, 
-                self.gateway_dest
+                self.gateway_dest,
+                gateway_id=self.gateway_address
             )
             ReticulumManager._server_handler.start()
         else:
@@ -585,7 +835,7 @@ class ReticulumManager:
         
         announce_data = self.config.gateway_name.encode("utf-8")
         self.gateway_dest.announce(app_data=announce_data)
-        print(f"📢 Annuncio inviato: {self.config.gateway_name}")
+        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 📢 Annuncio inviato: {self.config.gateway_name}")
         
         self.is_gateway = True
         self._pid = os.getpid()
@@ -630,6 +880,17 @@ class ReticulumManager:
             
             print(f"📥 Pacchetto ricevuto: {data.get('type', 'unknown')}")
             
+            if data.get("type") == "ledger_relay":
+                if not self.metrics:
+                    print("⚠️ Metrics non disponibile, ignoro richiesta ledger_relay")
+                    return
+                
+                if ReticulumManager._server_handler:
+                    ReticulumManager._server_handler._handle_packet(message, packet)
+                else:
+                    print("⚠️ Server handler non disponibile")
+                return
+            
             if data.get("type") == "info_request":
                 if not self.metrics:
                     print("⚠️ Metrics non disponibile, ignoro richiesta info")
@@ -671,8 +932,9 @@ class ReticulumManager:
                         print("⚠️ Nessuna risposta generata")
                 except Exception as e:
                     print(f"⚠️ Errore generazione risposta info: {e}")
-            else:
-                print(f"📥 Tipo pacchetto sconosciuto: {data.get('type')}")
+                return
+            
+            print(f"📥 Tipo pacchetto sconosciuto: {data.get('type')}")
                 
         except Exception as e:
             print(f"⚠️ Errore critico elaborazione pacchetto: {e}")
@@ -687,19 +949,12 @@ class ReticulumManager:
                 except:
                     pass
 
-    # ============================================================
-    # DISCOVER
-    # ============================================================
-
     def discover_gateways(self) -> List[Dict]:
         print("🔍 Cerco gateway su Reticulum...")
         if ReticulumManager._handler_gateway is None:
             print("   ⚠️ Handler gateway non inizializzato")
             return []
         
-        # ============================================================
-        # LEGGI DAL CONFIG O USA DEFAULT 86400 (24 ore)
-        # ============================================================
         discover_since = getattr(self.config, 'discover_since_seconds', 86400)
         since = int(time.time()) - discover_since
         
@@ -803,10 +1058,6 @@ class ReticulumManager:
             "stellar_latency_ms": ledger_status.get("stellar", {}).get("latency_ms")
         }
 
-
-# ============================================================
-# MAIN
-# ============================================================
 
 if __name__ == "__main__":
     manager = ReticulumManager()

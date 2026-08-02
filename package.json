@@ -10,6 +10,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "@xrplf/secret-numbers": "^3.0.0"
+    "xrpl": "^5.0.0",
+    "xrpl-secret-numbers": "^0.3.5"
   }
 }

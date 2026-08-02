@@ -1,14 +1,14 @@
 {
     "gateway": {
         "name": "gateway-TEST",
-        "announce_interval": 1800,
-        "internet": "on",
+        "announce_interval": 60,
+        "internet": "off",
         "ledger_check_interval": 1800,
         "ledger_timeout_seconds": 5,
         "query_interval": 3600,
         "max_peers_to_query": 10,
         "max_hops_for_query": 7,
-        "query_timeout_seconds": 60,
+        "query_timeout_seconds": 30,
         "discover_since_seconds": 86400
     },
     "wallet": {
