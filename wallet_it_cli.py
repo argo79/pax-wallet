@@ -19,6 +19,14 @@ from typing import Optional, Dict, Any, List
 
 from wallet_backend import WalletBackend, create_backend, Colors, format_time_ago, parse_tx_date
 
+
+# ============================================================
+# VERSIONE
+# ============================================================
+VERSION = "0.9.3b"
+__version__ = VERSION
+
+
 # ============================================================
 # FUNZIONI DI STAMPA CON COLORI (USANO Colors DAL BACKEND)
 # ============================================================
@@ -495,6 +503,11 @@ class PaxWalletCLI:
         memo = input("Memo (opzionale): ").strip()
         
         result = self.backend.send_payment(to_addr, amount, memo)
+        
+        # 🔥 SE È VIA RETICULUM, MOSTRA IN BLU
+        if result.get("via_reticulum", False):
+            print_blue(f"📡 Richiesta transazione via Reticulum")
+        
         if result.get("success"):
             print_green(f"✅ Pagamento inviato!")
             print(f"   Hash: {result.get('tx_hash', 'N/A')}")
