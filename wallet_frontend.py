@@ -913,12 +913,10 @@ class PaxWalletCLI:
             print("  6) Peer metriche")
             print("  7) Miglior gateway")
             print("  8) Richiedi info gateway")
-            print("  9) Invia transazione")
-            print(" 10) Testa tutti i gateway")
-            print(" 11) 🌐 Toggle internet (usa Reticulum)")
-            print(" 12) 🗑️ Rimuovi gateway manualmente")  # <-- NUOVA OPZIONE
+            print("  9) Testa tutti i gateway")
+            print(" 10) 🌐 Toggle internet (usa Reticulum)")
+            print(" 11) 🗑️ Rimuovi gateway manualmente")
             print("  0) Torna al menu principale")
-            print("-" * 50)
             
             sub = input("\nScelta: ").strip()
             
@@ -941,12 +939,10 @@ class PaxWalletCLI:
             elif sub == '8':
                 self._cmd_request_info()
             elif sub == '9':
-                self._cmd_send_reticulum()
-            elif sub == '10':
                 self._cmd_test_gateways()
-            elif sub == '11':
+            elif sub == '10':
                 self._cmd_toggle_internet()
-            elif sub == '12':
+            elif sub == '11':
                 self._cmd_remove_gateway()
             else:
                 print_red("❌ Scelta non valida")
@@ -1261,25 +1257,6 @@ class PaxWalletCLI:
                 print_red("❌ Scelta non valida")
         except ValueError:
             print_red("❌ Inserisci un numero valido")
-    
-    def _cmd_send_reticulum(self):
-        """Invia transazione via Reticulum"""
-        to_addr = input("Indirizzo destinatario: ").strip()
-        if not to_addr:
-            return
-        try:
-            amount = float(input("Ammontare: ").strip())
-        except ValueError:
-            print_red("❌ Ammontare non valido")
-            return
-        asset = input("Asset (XRP): ").strip() or "XRP"
-        
-        result = self.backend.send_via_reticulum(to_addr, amount, asset)
-        if result.get("success"):
-            print_green(f"✅ Transazione inviata via Reticulum!")
-            print(f"   Hash: {result.get('hash', 'N/A')}")
-        else:
-            print_red(f"❌ {result.get('message', 'Errore')}")
     
     def _cmd_test_gateways(self):
         """Testa tutti i gateway attivi"""

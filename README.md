@@ -727,7 +727,7 @@ Every contribution, big or small, helps keep development alive.
 
 | Cryptocurrency | Address |
 |----------------|---------|
-| **XRP** (Ripple) | `rBKbetm51vuQQfg4Yo8fvweRya7gedcr9J` |
+| **XRP** (Ripple) | `rULcbakdRpXR2jRxq7xKGnKGz8BmN46up4` |
 | **ETH** (Ethereum) | `0xd2d85288df96B4162814Ca7492039620371b9D81` |
 | **XMR** (Monero) | `87jacZEtYvXcgnvEp7wu45gLwRBYpvwMr3N9dqhNipPWV69XwQX658tS73VEdghLopG1wA4STEdMPcGF8Tc3e18eJyQ4kMA` |
 

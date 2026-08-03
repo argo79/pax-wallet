@@ -1348,22 +1348,17 @@ class WalletBackend:
             return {"success": False, "transactions": [], "count": 0, "message": str(e)}
     
     def _send_payment_reticulum(self, to_address: str, amount: float, memo: str) -> Dict[str, Any]:
-        """
-        Invia una transazione XRP via Reticulum usando un gateway remoto.
-        La transazione viene firmata localmente e il blob viene inviato al gateway.
-        """
         if not self.reticulum or not self.metrics:
             return {"success": False, "tx_hash": "", "message": "Reticulum non disponibile"}
-        
-        # 1. Seleziona il miglior gateway
+
         gateway = self._select_best_gateway()
         if not gateway:
             return {"success": False, "tx_hash": "", "message": "Nessun gateway disponibile"}
-        
+
         manager = self.wallet._xrp_manager
         seed_type = manager.seed_type
-        
-        # 2. Ottieni il wallet (come in _send_xrp)
+
+        # 1. Ottieni il wallet
         try:
             if seed_type in ["bip39", "private_key"]:
                 private_key_hex = manager.base_private.hex() if manager.base_private else None
@@ -1381,95 +1376,167 @@ class WalletBackend:
                 wallet = manager.get_wallet()
         except Exception as e:
             return {"success": False, "tx_hash": "", "message": f"Errore wallet: {e}"}
+
+        # 2. Ottieni ledger corrente e sequenza dal gateway
+        account_info = self._get_account_info_from_gateway(gateway, wallet.classic_address, manager.network)
+        if not account_info.get("success"):
+            return {"success": False, "tx_hash": "", "message": account_info.get("message", "Errore account")}
         
-        # 3. Prepara e firma la transazione (usando autofill e sign)
-        try:
-            from xrpl.account import get_balance
-            from xrpl.models.transactions import Payment
-            from xrpl.transaction import autofill, sign
-            from xrpl.clients import JsonRpcClient
-            from xrpl.models.transactions import Memo
-            import json
-            
-            # Connessione al ledger per autofill (anche se internet è off, serve per fee e sequence)
-            # Ma se internet è off, non possiamo fare autofill. Dobbiamo delegare al gateway.
-            # Quindi, invece di autofill, costruiamo la transazione con i campi minimi e
-            # lasciamo che il gateway faccia autofill. Oppure usiamo il client internet per autofill.
-            # Usiamo il client internet per autofill, anche se use_internet è False.
-            # (Potremmo passare il client al gateway, ma per ora usiamo internet solo per autofill)
-            urls = {
-                "mainnet": "https://s1.ripple.com:51234/",
-                "testnet": "https://s.altnet.rippletest.net:51234/",
-            }
-            client = JsonRpcClient(urls.get(manager.network, urls["testnet"]))
-            
-            # Verifica saldo (opzionale, ma utile)
-            balance_drops = get_balance(wallet.classic_address, client)
-            balance_xrp = int(balance_drops) / 1_000_000 if isinstance(balance_drops, str) else balance_drops / 1_000_000
-            if balance_xrp < amount:
-                return {"success": False, "tx_hash": "", "message": f"Saldo insufficiente: {balance_xrp:.6f} XRP"}
-            
-            # Prepara transazione
-            amount_drops = str(int(amount * 1_000_000))
-            payment_params = {
-                "account": wallet.classic_address,
-                "amount": amount_drops,
-                "destination": to_address
-            }
-            if memo:
-                memo_hex = memo.encode('utf-8').hex()
-                if len(memo_hex) % 2 != 0:
-                    memo_hex = '0' + memo_hex
-                payment_params["memos"] = [Memo(memo_data=memo_hex)]
-            
-            payment = Payment(**payment_params)
-            tx = autofill(payment, client)  # autofill per fee e sequence
-            signed_tx = sign(tx, wallet)    # firma locale
-            
-            # Serializza la transazione firmata in blob hex
-            signed_tx_blob = signed_tx.get_blob().hex()
-            
-        except Exception as e:
-            return {"success": False, "tx_hash": "", "message": f"Errore preparazione transazione: {e}"}
+        sequence = account_info.get("sequence", 0)
+        current_ledger = account_info.get("ledger_index", 0)
         
-        # 4. Invia la transazione firmata al gateway via Reticulum
+        if sequence == 0:
+            return {"success": False, "tx_hash": "", "message": "Sequence non valida"}
+
+        # 3. Tentativi con margine crescente
+        max_attempts = 5
+        margin_start = 20
+        margin_increment = 10
+
+        for attempt in range(max_attempts):
+            margin = margin_start + (attempt * margin_increment)
+            last_ledger = current_ledger + margin
+            
+            print_blue(f"📡 Tentativo {attempt+1}/{max_attempts} - Margine: {margin} ledger (LastLedger: {last_ledger})")
+
+            # 4. Prepara e firma la transazione (con Sequence!)
+            try:
+                from xrpl.models.transactions import Payment
+                from xrpl.transaction import sign
+                from xrpl.models.transactions import Memo
+
+                amount_drops = str(int(amount * 1_000_000))
+                payment_params = {
+                    "account": wallet.classic_address,
+                    "amount": amount_drops,
+                    "destination": to_address,
+                    "sequence": sequence,
+                    "last_ledger_sequence": last_ledger,
+                    "fee": "10"   # <-- Fee fissa di 10 drops (0.00001 XRP)
+                }
+                if memo:
+                    memo_hex = memo.encode('utf-8').hex()
+                    if len(memo_hex) % 2 != 0:
+                        memo_hex = '0' + memo_hex
+                    payment_params["memos"] = [Memo(memo_data=memo_hex)]
+
+                payment = Payment(**payment_params)
+                signed_tx = sign(payment, wallet)
+                signed_tx_blob = signed_tx.blob()  # stringa hex
+
+            except Exception as e:
+                print_yellow(f"⚠️ Errore preparazione tentativo {attempt+1}: {e}")
+                continue
+
+            # 5. Invia al gateway
+            request = {
+                "type": "ledger_relay",
+                "version": "1.0",
+                "operation": "submit_transaction",
+                "payload": {
+                    "tx_blob": signed_tx_blob,
+                    "network": manager.network
+                },
+                "timestamp": int(time.time()),
+                "client_gateway_id": self.reticulum.gateway_address
+            }
+
+            print_blue(f"📡 Invio tentativo {attempt+1} a {gateway.get('name', 'UNKNOWN')}")
+
+            response = self._send_reticulum_request(gateway['gateway_id'], request, timeout=60)
+
+            if response and response.get("success"):
+                result = response.get("result", {})
+                tx_hash = result.get("hash", "unknown")
+                result_code = result.get("result_code", "unknown")
+
+                if result_code == "tesSUCCESS":
+                    return {
+                        "success": True,
+                        "tx_hash": tx_hash,
+                        "message": f"Transazione inviata via Reticulum (tentativo {attempt+1})! Hash: {tx_hash}"
+                    }
+                else:
+                    if result_code == "tefMAX_LEDGER":
+                        print_yellow(f"⚠️ LastLedger scaduto (tentativo {attempt+1}), aumento margine...")
+                        continue
+                    elif result_code == "tecFAILED_SEQUENCE":
+                        print_yellow(f"⚠️ Sequence scaduta (tentativo {attempt+1}), aggiorno sequence...")
+                        # Richiedi nuova sequenza
+                        new_info = self._get_account_info_from_gateway(gateway, wallet.classic_address, manager.network)
+                        if new_info.get("success"):
+                            sequence = new_info.get("sequence", sequence)
+                        continue
+                    else:
+                        return {
+                            "success": False,
+                            "tx_hash": tx_hash,
+                            "message": f"Transazione fallita: {result_code}"
+                        }
+            else:
+                error = response.get("error", "Errore sconosciuto") if response else "Nessuna risposta"
+                print_yellow(f"⚠️ Errore Reticulum tentativo {attempt+1}: {error}")
+                continue
+
+        return {
+            "success": False,
+            "tx_hash": "",
+            "message": f"Transazione fallita dopo {max_attempts} tentativi."
+        }
+
+
+    def _get_account_info_from_gateway(self, gateway: Dict, address: str, network: str) -> Dict[str, Any]:
+        """Richiede info account (sequence, balance) al gateway via Reticulum."""
         request = {
             "type": "ledger_relay",
             "version": "1.0",
-            "operation": "submit_transaction",
+            "operation": "get_account_info",
             "payload": {
-                "tx_blob": signed_tx_blob,
-                "network": manager.network
+                "address": address,
+                "network": network
             },
             "timestamp": int(time.time()),
             "client_gateway_id": self.reticulum.gateway_address
         }
         
-        print_blue(f"📡 Invio transazione via Reticulum a {gateway.get('name', 'UNKNOWN')}")
-        
-        response = self._send_reticulum_request(gateway['gateway_id'], request, timeout=60)
+        response = self._send_reticulum_request(gateway['gateway_id'], request, timeout=30)
         
         if response and response.get("success"):
             result = response.get("result", {})
-            tx_hash = result.get("hash", "unknown")
-            result_code = result.get("result_code", "unknown")
-            
-            if result_code == "tesSUCCESS":
-                return {
-                    "success": True,
-                    "tx_hash": tx_hash,
-                    "message": f"Transazione inviata via Reticulum! Hash: {tx_hash}"
-                }
-            else:
-                return {
-                    "success": False,
-                    "tx_hash": tx_hash,
-                    "message": f"Transazione fallita: {result_code}"
-                }
+            return {
+                "success": True,
+                "sequence": result.get("sequence", 0),
+                "balance": result.get("balance", 0),
+                "ledger_index": result.get("ledger_index", 0)
+            }
         else:
-            error = response.get("error", "Errore sconosciuto") if response else "Nessuna risposta"
-            return {"success": False, "tx_hash": "", "message": f"Errore Reticulum: {error}"}
+            error = response.get("error", "Nessuna risposta") if response else "Nessuna risposta"
+            return {"success": False, "message": f"Errore account: {error}"}
 
+
+    def _get_ledger_from_gateway(self, gateway: Dict, network: str) -> Dict[str, Any]:
+        """Richiede il ledger corrente al gateway via Reticulum."""
+        request = {
+            "type": "ledger_relay",
+            "version": "1.0",
+            "operation": "get_ledger_info",
+            "payload": {"network": network},
+            "timestamp": int(time.time()),
+            "client_gateway_id": self.reticulum.gateway_address
+        }
+        
+        response = self._send_reticulum_request(gateway['gateway_id'], request, timeout=30)
+        
+        if response and response.get("success"):
+            result = response.get("result", {})
+            return {
+                "success": True,
+                "ledger_index": result.get("ledger_index", 0),
+                "base_fee": result.get("base_fee", "10")
+            }
+        else:
+            error = response.get("error", "Nessuna risposta") if response else "Nessuna risposta"
+            return {"success": False, "message": f"Errore ledger: {error}"}
 
     def fund_testnet(self) -> Dict[str, Any]:
         if not self.wallet or not self.wallet._xrp_manager:
@@ -1730,69 +1797,6 @@ class WalletBackend:
             return {"success": False, "message": "Metrics not available"}
         best = self.metrics.get_best_gateway(asset)
         return {"success": True, "gateway": best, "message": "OK"} if best else {"success": False, "message": "No gateway found"}
-    
-    def send_via_reticulum(self, to_address: str, amount: float, asset: str = "XRP") -> Dict[str, Any]:
-        if not self.reticulum:
-            return {"success": False, "message": "Reticulum not available"}
-        if not self.wallet or not self.wallet._xrp_manager:
-            return {"success": False, "message": "No wallet"}
-        
-        args = ["--to", to_address, "--amount", str(amount), "--asset", asset]
-        return self._reticulum_send(args)
-    
-    def _reticulum_send(self, args: List[str]) -> Dict[str, Any]:
-        if not self.reticulum:
-            return {"success": False, "message": "Reticulum not available"}
-        
-        to_addr = None
-        amount = None
-        asset = "XRP"
-        gateway_id = None
-        
-        for i, arg in enumerate(args):
-            if arg == "--to" and i + 1 < len(args):
-                to_addr = args[i + 1].strip()
-            elif arg == "--amount" and i + 1 < len(args):
-                try:
-                    amount = float(args[i + 1])
-                except:
-                    pass
-            elif arg == "--asset" and i + 1 < len(args):
-                asset = args[i + 1]
-            elif arg == "--gateway" and i + 1 < len(args):
-                gateway_id = args[i + 1]
-        
-        if not to_addr or not amount:
-            return {"success": False, "message": "Missing --to or --amount"}
-        if len(to_addr) < 20:
-            return {"success": False, "message": "Address too short"}
-        if amount <= 0:
-            return {"success": False, "message": "Amount must be > 0"}
-        
-        if not gateway_id:
-            gateways = self.reticulum.discover_gateways()
-            if not gateways:
-                return {"success": False, "message": "No gateway available"}
-            gateway_id = gateways[0].get('gateway_id')
-        
-        manager = self.wallet._xrp_manager
-        tx_data = {
-            "from": manager.get_address(),
-            "to": to_addr,
-            "amount": str(amount),
-            "asset": asset,
-            "network": manager.network,
-            "timestamp": int(time.time())
-        }
-        
-        try:
-            response = self.reticulum.send_transaction_via_reticulum(gateway_id, tx_data)
-            if response.get("success"):
-                return {"success": True, "hash": response.get('hash', 'N/A'), "message": "Transaction sent"}
-            else:
-                return {"success": False, "message": response.get('error', 'Unknown error')}
-        except Exception as e:
-            return {"success": False, "message": str(e)}
 
     def _show_single_peer(self, peer: Dict):
         """Mostra un singolo peer in formato tabella - COMPLETO"""

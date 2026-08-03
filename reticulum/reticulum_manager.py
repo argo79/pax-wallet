@@ -246,7 +246,7 @@ class GatewayServerHandler:
         with self._lock:
             for link in self._active_links:
                 try:
-                    if link and link.is_established():
+                    if link and link.established:
                         link.teardown()
                 except Exception as e:
                     print(f"⚠️ Errore chiusura link: {e}")
@@ -418,10 +418,6 @@ class GatewayServerHandler:
             print(f"❌ Invio resource fallito: {resource.status}")
     
     def _handle_submit_transaction(self, payload: Dict) -> Dict:
-        """
-        Riceve un blob firmato (hex) e lo invia al ledger XRP.
-        Supporta mainnet e testnet.
-        """
         tx_blob = payload.get("tx_blob")
         network = payload.get("network", "mainnet")
         
@@ -431,37 +427,50 @@ class GatewayServerHandler:
         try:
             from xrpl.transaction import submit_and_wait
             from xrpl.clients import JsonRpcClient
-            import binascii
             
-            # Decodifica il blob da hex a bytes
-            blob_bytes = binascii.unhexlify(tx_blob)
-            
-            # Scegli l'URL in base al network
             urls = {
                 "mainnet": "https://s1.ripple.com:51234/",
-                "testnet": "https://s.altnet.rippletest.net:51234/",
-                "devnet": "https://s.devnet.rippletest.net:51234/"
+                "testnet": "https://s.altnet.rippletest.net:51234/"
             }
             client = JsonRpcClient(urls.get(network, urls["mainnet"]))
             
-            # Invia la transazione
-            response = submit_and_wait(blob_bytes, client)
-            
-            # Estrai i risultati
-            tx_hash = response.result.get("hash", "unknown")
-            result_code = response.result.get('meta', {}).get('TransactionResult', 'unknown')
-            ledger = response.result.get("ledger_index")
+            # 🔥 PASSA LA STRINGA HEX DIRETTAMENTE (NON BYTES!)
+            response = submit_and_wait(tx_blob, client)  # <-- tx_blob è stringa hex
             
             return {
-                "hash": tx_hash,
-                "result_code": result_code,
-                "ledger": ledger,
-                "network": network
+                "hash": response.result.get("hash", "unknown"),
+                "result_code": response.result.get('meta', {}).get('TransactionResult', 'unknown'),
+                "ledger": response.result.get("ledger_index")
             }
-            
         except Exception as e:
             return {"error": str(e)}
-        
+
+    def _handle_get_ledger_info(self, payload: Dict) -> Dict:
+        """Restituisce il ledger corrente e la fee base."""
+        try:
+            from xrpl.clients import JsonRpcClient
+            from xrpl.models.requests import Ledger
+            
+            urls = {
+                "mainnet": "https://s1.ripple.com:51234/",
+                "testnet": "https://s.altnet.rippletest.net:51234/"
+            }
+            network = payload.get("network", "mainnet")
+            client = JsonRpcClient(urls.get(network, urls["mainnet"]))
+            
+            request = Ledger(ledger_index="validated")
+            response = client.request(request)
+            
+            ledger_index = response.result.get("ledger_index", 0)
+            fee = response.result.get("ledger", {}).get("base_fee", "10")
+            
+            return {
+                "ledger_index": ledger_index,
+                "base_fee": fee
+            }
+        except Exception as e:
+            return {"error": str(e)}
+
     # ============================================================
     # METODI PER LEDGER RELAY
     # ============================================================
@@ -478,6 +487,10 @@ class GatewayServerHandler:
             result = self._handle_submit_transaction(payload)
         elif operation == "send_payment":
             result = self._handle_send_payment(payload)
+        elif operation == "get_ledger_info":
+            result = self._handle_get_ledger_info(payload)
+        elif operation == "get_account_info":
+            result = self._handle_get_account_info(payload)
         else:
             return {"success": False, "error": f"Operazione non supportata: {operation}"}
         
@@ -520,6 +533,41 @@ class GatewayServerHandler:
         except Exception as e:
             return {"error": str(e)}
     
+    def _handle_get_account_info(self, payload: Dict) -> Dict:
+        """Restituisce le info dell'account (sequence, balance, ledger_index)."""
+        try:
+            from xrpl.clients import JsonRpcClient
+            from xrpl.models.requests import AccountInfo
+            
+            address = payload.get("address")
+            network = payload.get("network", "mainnet")
+            
+            if not address:
+                return {"error": "Indirizzo mancante"}
+            
+            urls = {
+                "mainnet": "https://s1.ripple.com:51234/",
+                "testnet": "https://s.altnet.rippletest.net:51234/"
+            }
+            client = JsonRpcClient(urls.get(network, urls["mainnet"]))
+            
+            request = AccountInfo(account=address, ledger_index="validated")
+            response = client.request(request)
+            
+            account_data = response.result.get("account_data", {})
+            sequence = account_data.get("Sequence", 0)
+            balance = account_data.get("Balance", 0)
+            ledger_index = response.result.get("ledger_index", 0)   # <-- AGGIUNGI
+            
+            return {
+                "sequence": sequence,
+                "balance": balance,
+                "address": address,
+                "ledger_index": ledger_index   # <-- AGGIUNGI
+            }
+        except Exception as e:
+            return {"error": str(e)}
+
     def _handle_get_history(self, payload: Dict) -> Dict:
         address = payload.get("address")
         crypto = payload.get("crypto", "XRP")
