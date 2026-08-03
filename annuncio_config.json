@@ -1,8 +1,11 @@
 {
     "gateway": {
         "name": "gateway-TEST",
-        "announce_interval": 60,
+        "announce_interval": 300,
         "internet": "off",
+        "use_tor": "off",
+        "tor_socks_port": 9050,
+        "tor_timeout_seconds": 30,
         "ledger_check_interval": 1800,
         "ledger_timeout_seconds": 5,
         "query_interval": 3600,

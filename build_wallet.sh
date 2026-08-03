@@ -69,6 +69,9 @@ select_language() {
             exit 1
             ;;
     esac
+
+    export SCRIPT_FILE
+    export LANG_TAG
 }
 
 # ============================================================
@@ -174,24 +177,23 @@ install_deps() {
     
     if [[ "$PLATFORM" == "android" ]]; then
         echo "   📱 Android/Termux: usando versioni compatibili..."
-        
-        # Installa coincurve 19.0.0 prima
-        echo "   📦 coincurve 19.0.0..."
         pip install coincurve==19.0.0
-        
-        # Poi bip32
-        echo "   📦 bip32..."
         pip install bip32
-        
-        # Poi il resto
-        echo "   📦 altre dipendenze..."
         pip install mnemonic xrpl-py stellar-sdk ecdsa base58 pyinstaller
         pip install colorama
         pip install RNS --no-deps
+        pip install PySocks
+        pip install 'requests[socks]'
+        # 🔥 AGGIUNGI httpx[socks]
+        pip install 'httpx[socks]'
     else
         pip install bip32 mnemonic xrpl-py stellar-sdk cryptography ecdsa base58 pyinstaller
         pip install colorama
         pip install RNS
+        pip install PySocks
+        pip install 'requests[socks]'
+        # 🔥 AGGIUNGI httpx[socks]
+        pip install 'httpx[socks]'
     fi
     
     echo "✅ Dipendenze installate"
@@ -221,7 +223,7 @@ build_linux_android() {
     # Assicura che dist esista
     mkdir -p dist
     
-    pyinstaller --onefile \
+        pyinstaller --onefile \
         --name "${APP_NAME}" \
         --collect-all RNS \
         --add-data "wallet_core.so:." \
@@ -244,6 +246,10 @@ build_linux_android() {
         --hidden-import colorama \
         --hidden-import RNS.Interfaces \
         --hidden-import RNS.Interfaces.Interface \
+        --hidden-import PySocks \
+        --hidden-import socks \
+        --hidden-import httpx \
+        --hidden-import socksio \
         "$SCRIPT_FILE"
     
     if [[ -f "dist/${APP_NAME}" ]]; then
@@ -365,6 +371,8 @@ Write-Host "📦 Dipendenze..." -ForegroundColor Yellow
 pip install bip32 mnemonic xrpl-py stellar-sdk cryptography ecdsa base58 pyinstaller
 pip install colorama
 pip install RNS
+pip install PySocks
+pip install 'requests[socks]'
 
 # BUILD
 Write-Host ""
@@ -403,6 +411,8 @@ pyinstaller --onefile --console `
     --hidden-import colorama `
     --hidden-import RNS.Interfaces `
     --hidden-import RNS.Interfaces.Interface `
+    --hidden-import PySocks \ `
+    --hidden-import socks \ `
     $SCRIPT_FILE
 
 if ($LASTEXITCODE -eq 0) {

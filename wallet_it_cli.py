@@ -23,7 +23,7 @@ from wallet_backend import WalletBackend, create_backend, Colors, format_time_ag
 # ============================================================
 # VERSIONE
 # ============================================================
-VERSION = "0.9.3b"
+VERSION = "0.10.1b"
 __version__ = VERSION
 
 
@@ -897,13 +897,27 @@ class PaxWalletCLI:
             status = self.backend.get_status()
             internet_status = "🌐 ON" if self.backend.use_internet else "📡 OFF (Reticulum)"
             
+            # 🔥 STATO TOR SEMPRE VISIBILE
+            tor_status = "🧅 ON" if self.backend.use_tor else "🧅 OFF"
+            tor_reachable = "✅" if self.backend._test_tor() else "❌"
+            
+            # IP solo se internet è ON
+            if self.backend.use_internet:
+                ip_info = self.backend.get_ip_status()
+                ip = ip_info.get("ip", "N/A")
+                ip_display = f"{ip} ({tor_status})"
+            else:
+                ip_display = "⛔ N/A (Reticulum)"
+            
             print("\n" + "=" * 50)
             print("  📡 RETICULUM")
             print("=" * 50)
             print(f"  Gateway: {'✅ Attivo' if status.get('gateway_active') else '❌ Fermo'}")
             print(f"  Peer conosciuti: {status.get('wallet_count', 0)}")
             print(f"  Modalità internet: {internet_status}")
-            
+            print(f"  TOR: {tor_status} {tor_reachable}")
+            print(f"  IP Pubblico: {ip_display}")
+
             print("\n" + "-" * 50)
             print("  1) Stato gateway")
             print("  2) Avvia gateway")
@@ -915,8 +929,10 @@ class PaxWalletCLI:
             print("  8) Richiedi info gateway")
             print("  9) Testa tutti i gateway")
             print(" 10) 🌐 Toggle internet (usa Reticulum)")
-            print(" 11) 🗑️ Rimuovi gateway manualmente")
+            print(" 11) 🧅 Toggle TOR (usa rete anonima)")
+            print(" 12) 🗑️ Rimuovi gateway manualmente")
             print("  0) Torna al menu principale")
+            print("-" * 50)
             
             sub = input("\nScelta: ").strip()
             
@@ -943,15 +959,21 @@ class PaxWalletCLI:
             elif sub == '10':
                 self._cmd_toggle_internet()
             elif sub == '11':
+                self._cmd_toggle_tor()
+            elif sub == '12':
                 self._cmd_remove_gateway()
             else:
                 print_red("❌ Scelta non valida")
     
     def _cmd_gateway_status(self):
-        """Stato gateway"""
+        """Stato gateway con IP e stato TOR"""
         result = self.backend.get_gateway_status()
         if result.get("success"):
             status = result.get("status", {})
+            
+            # 🔥 TEST TOR IN TEMPO REALE
+            tor_reachable = "✅" if self.backend._test_tor() else "❌"
+            
             print_bold("\n📊 STATO GATEWAY")
             print("=" * 60)
             print(f"   Running: {status.get('running', False)}")
@@ -963,6 +985,18 @@ class PaxWalletCLI:
             print(f"   Wallet Address: {status.get('wallet_address', 'N/A')}")
             print(f"   Gateway Count: {status.get('gateway_count', 0)}")
             print(f"   Wallet Count: {status.get('wallet_count', 0)}")
+            
+            # 🔥 MOSTRA IP E STATO TOR
+            public_ip = status.get('public_ip', 'N/A')
+            use_tor = status.get('use_tor', False)
+            internet_on = status.get('internet_on', True)
+            
+            tor_status = "🧅 TOR ON" if use_tor else "🌐 Direct"
+            internet_status = "🌐 ON" if internet_on else "📡 OFF (Reticulum)"
+            
+            print(f"   TOR: {tor_status} {tor_reachable}")   # <-- AGGIUNTO
+            print(f"   IP Pubblico: {public_ip} ({tor_status})")
+            print(f"   Internet: {internet_status}")
             print("=" * 60)
         else:
             print_red(f"❌ {result.get('message', 'Errore')}")
@@ -1059,14 +1093,14 @@ class PaxWalletCLI:
             return
         
         print_bold(f"\n🔍 PEER ORDINATI PER PERFORMANCE ({len(peers)})")
-        print("=" * 260)
-        print(f"{'#':<3} {'Nome':<22} {'Score':<6} {'Rel':<6} {'Rep':<4} {'Hops':<5} {'RTT':<8} {'XRP':<14} {'Stellar':<14} {'Internet':<9} {'Ultimo visto':<15} {'ID':<36} {'Assets'}")
-        print("-" * 260)
+        print("=" * 280)
+        # 🔥 AGGIUNGI COLONNA TOR
+        print(f"{'#':<3} {'Nome':<22} {'Score':<6} {'Rel':<6} {'Rep':<4} {'Hops':<5} {'RTT':<8} {'XRP':<14} {'Stellar':<14} {'Internet':<9} {'TOR':<6} {'Ultimo visto':<15} {'ID':<36} {'Assets'}")
+        print("-" * 280)
         
         for idx, p in enumerate(peers, 1):
-            # 🔥 SCORE GIÀ CALCOLATO DAL BACKEND
             sc = round(p.get('_score', 0))
-            name = str(p.get('name', 'UNKNOWN'))[:16]            
+            name = str(p.get('name', 'UNKNOWN'))[:16]
             rel = round(p.get('reliability', 0), 2)
             rep = p.get('reputation', 50)
             hops = str(p.get('hops', '?'))
@@ -1087,8 +1121,18 @@ class PaxWalletCLI:
                 stellar_str = "❌"
             
             internet = "🌐" if p.get('has_internet') else "📡"
-            last_seen = format_time_ago(p.get('last_seen'))  # <-- USA FUNZIONE GLOBALE
+            last_seen = format_time_ago(p.get('last_seen'))
             gw_id = p.get('gateway_id', 'N/A')[:36]
+            
+            # 🔥 STATO TOR
+            tor_enabled = p.get('tor_enabled', False)
+            tor_reachable = p.get('tor_reachable', False)
+            if tor_enabled and tor_reachable:
+                tor_str = "🧅✅"
+            elif tor_enabled:
+                tor_str = "🧅❌"
+            else:
+                tor_str = "—"
             
             assets = p.get('assets', [])
             if isinstance(assets, list):
@@ -1102,11 +1146,10 @@ class PaxWalletCLI:
             sc_color = Colors.GREEN if sc > 70 else Colors.YELLOW if sc > 40 else Colors.RED
             rel_color = Colors.GREEN if rel > 0.9 else Colors.YELLOW if rel > 0.7 else Colors.RED
             
-            print(f"{idx:<3} {name:<20} {sc_color}{sc:5.0f}{Colors.RESET} {rel_color}{rel:5.2f}{Colors.RESET} {rep:<4} {hops:<5} {rtt:<8} {xrp_str:<14} {stellar_str:<14} {internet:<9} {last_seen:<15} {gw_id:<36} {assets_str}")
+            print(f"{idx:<3} {name:<20} {sc_color}{sc:5.0f}{Colors.RESET} {rel_color}{rel:5.2f}{Colors.RESET} {rep:<4} {hops:<5} {rtt:<8} {xrp_str:<14} {stellar_str:<14} {internet:<9} {tor_str:<6} {last_seen:<15} {gw_id:<36} {assets_str}")
         
-        print("=" * 260)
+        print("=" * 280)
         
-        # Statistiche
         stats = result.get("stats", {})
         if stats:
             print(f"\n📊 Statistiche:")
@@ -1118,8 +1161,11 @@ class PaxWalletCLI:
                 print(f"   Latenza media Reticulum: {round(stats.get('avg_latency_ms'), 0)}ms")
             if stats.get('avg_score'):
                 print(f"   Score medio: {round(stats.get('avg_score'))}")
+            # 🔥 AGGIUNGI STATISTICA TOR
+            tor_peers = stats.get('tor_peers', 0)
+            if tor_peers > 0:
+                print(f"   Gateway con TOR: {tor_peers}")
         
-        # Miglior peer
         if peers:
             b = peers[0]
             best_score = b.get('_score', 0)
@@ -1130,6 +1176,15 @@ class PaxWalletCLI:
             print(f"   XRP: {'✅' if b.get('xrp_reachable') else '❌'} ({b.get('xrp_latency_ms', '?')}ms)")
             print(f"   Stellar: {'✅' if b.get('stellar_reachable') else '❌'} ({b.get('stellar_latency_ms', '?')}ms)")
             print(f"   Internet: {'✅' if b.get('has_internet') else '❌'}")
+            # 🔥 AGGIUNGI TOR AL MIGLIOR PEER
+            tor_enabled = b.get('tor_enabled', False)
+            tor_reachable = b.get('tor_reachable', False)
+            if tor_enabled and tor_reachable:
+                print(f"   TOR: ✅ Attivo e raggiungibile")
+            elif tor_enabled:
+                print(f"   TOR: ⚠️ Attivo ma non raggiungibile")
+            else:
+                print(f"   TOR: ❌ Non attivo")
             if b.get('assets'):
                 print(f"   Assets: {', '.join(b.get('assets', []))}")
     
@@ -1277,21 +1332,34 @@ class PaxWalletCLI:
             return
         
         print_bold(f"\n📊 TEST COMPLETATO")
-        print("=" * 60)
+        print("=" * 80)
         print(f"   Gateway testati: {result.get('count', 0)}")
         print(f"   Risposte ricevute: {result.get('successful', 0)}")
-        print("=" * 60)
+        print("=" * 80)
         
-        # Tabella semplice
+        # 🔥 TABELLA CON STATO RETICULUM, INTERNET E TOR
         print("\n📋 RISULTATI:")
-        print("-" * 80)
-        print(f"{'#':<3} {'Nome':<20} {'Stato':<12} {'Hops':<6}")
-        print("-" * 80)
+        print("-" * 100)
+        print(f"{'#':<3} {'Nome':<20} {'Reticulum':<12} {'Internet':<10} {'TOR':<8} {'Hops':<6}")
+        print("-" * 100)
         
         for idx, r in enumerate(results, 1):
-            print(f"{idx:<3} {r.get('name', 'UNKNOWN'):<20} {r.get('status', '?'):<12} {r.get('hops', '?'):<6}")
+            reticulum_status = "✅ ONLINE" if r.get('status') == "✅ ONLINE" else "❌ OFFLINE"
+            internet_status = "🌐 SI" if r.get('has_internet', False) else "📡 NO"
+            tor_status = r.get('tor_status', '—')
+            hops = r.get('hops', '?')
+            
+            print(f"{idx:<3} {r.get('name', 'UNKNOWN'):<20} {reticulum_status:<12} {internet_status:<10} {tor_status:<8} {hops:<6}")
         
-        print("-" * 80)
+        print("-" * 100)
+        print("\n📌 Legenda:")
+        print("   Reticulum: ✅ ONLINE = raggiungibile via rete Reticulum")
+        print("   Internet:  🌐 SI  = gateway ha accesso a internet")
+        print("   Internet:  📡 NO  = gateway NON ha accesso a internet")
+        print("   TOR:       🧅✅  = TOR attivo e raggiungibile")
+        print("   TOR:       🧅❌  = TOR attivo ma non raggiungibile")
+        print("   TOR:       —      = TOR non attivo")
+        
         print_green("\n✅ Dati aggiornati! Usa '6) Peer metriche' per vedere la classifica completa.")
 
     def _cmd_remove_gateway(self):
@@ -1378,6 +1446,37 @@ class PaxWalletCLI:
         else:
             print_green("🌐 Modalità Internet attivata")
             print_yellow("   Le operazioni useranno connessione diretta")
+
+    def _cmd_toggle_tor(self):
+        """Toggle TOR (rete anonima)"""
+        current = self.backend.use_tor
+        
+        # Se stai attivando TOR, verifica che sia raggiungibile
+        if not current:
+            print_blue("🧅 Verifica connessione TOR...")
+            if not self.backend._test_tor():
+                print_yellow("⚠️ TOR non risponde su localhost:9050")
+                print_yellow("   Assicurati che TOR sia in esecuzione.")
+                print_yellow("   Per avviarlo: tor (in un terminale separato)")
+                confirm = input("   Attivare comunque? (s/N): ").strip().lower()
+                if confirm != 's':
+                    print_yellow("❌ TOR non attivato")
+                    return
+        
+        # Cambia stato
+        self.backend.set_use_tor(not current)
+        
+        if current:
+            print_green("🧅 TOR disattivato")
+            print_yellow("   Le connessioni al ledger useranno internet diretto")
+        else:
+            print_green("🧅 TOR attivato")
+            print_yellow("   Le connessioni al ledger useranno rete TOR (più lento)")
+            # Verifica finale
+            if self.backend._test_tor():
+                print_green("✅ TOR raggiungibile e funzionante")
+            else:
+                print_yellow("⚠️ TOR non risponde. Controlla il demone.")
 
 # ============================================================
 # MAIN

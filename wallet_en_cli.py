@@ -23,12 +23,12 @@ from wallet_backend import WalletBackend, create_backend, Colors, format_time_ag
 # ============================================================
 # VERSION
 # ============================================================
-VERSION = "0.9.3b"
+VERSION = "0.10.1b"
 __version__ = VERSION
 
 
 # ============================================================
-# PRINT FUNCTIONS WITH COLORS (using Colors from backend)
+# COLOR PRINT FUNCTIONS (USE Colors FROM BACKEND)
 # ============================================================
 
 def print_green(msg): print(f"{Colors.GREEN}{msg}{Colors.RESET}")
@@ -40,7 +40,7 @@ def print_bold(msg): print(f"{Colors.BOLD}{msg}{Colors.RESET}")
 
 
 # ============================================================
-# UTILITY (frontend specific)
+# UTILITIES (frontend-specific only)
 # ============================================================
 
 def format_address(address: str, length: int = 25) -> str:
@@ -56,7 +56,7 @@ def format_address(address: str, length: int = 25) -> str:
 # ============================================================
 
 class PaxWalletCLI:
-    """Frontend CLI for PAX Wallet - USES BACKEND"""
+    """CLI Frontend for PAX Wallet - USES BACKEND"""
     
     def __init__(self):
         self.backend: Optional[WalletBackend] = None
@@ -68,7 +68,7 @@ class PaxWalletCLI:
     # ============================================================
     
     def _unlock(self) -> bool:
-        """Asks for password and initializes backend"""
+        """Ask for password and initialize backend"""
         print("\n" + "=" * 60)
         print("  🔐 PAX WALLET - UNLOCK")
         print("=" * 60)
@@ -78,7 +78,7 @@ class PaxWalletCLI:
         has_encrypted = temp_backend._has_encrypted_files()
         
         if has_encrypted:
-            print("   Enter your password to unlock the wallet.")
+            print("   Enter the password to unlock the wallet.")
             print("")
             max_attempts = 3
             attempts = 0
@@ -90,21 +90,21 @@ class PaxWalletCLI:
                     attempts += 1
                     continue
                 
-                # 🔥 Try to initialize with this password
+                # 🔥 TRY TO INITIALIZE WITH THIS PASSWORD
                 self.backend = create_backend(password)
                 result = self.backend.init()
                 
-                # Verify wallet loaded correctly
+                # Verify if wallet loaded correctly
                 active = self.backend.get_active_wallet()
                 if active.get("name") and active.get("loaded"):
                     self._password = password
                     print_green("✅ Password verified")
                     return True
                 
-                # If we get here, the password is wrong
+                # If we get here, password is wrong
                 attempts += 1
                 remaining = max_attempts - attempts
-                print_red(f"❌ Wrong password. Attempts left: {remaining}")
+                print_red(f"❌ Incorrect password. Attempts remaining: {remaining}")
                 
                 if remaining == 0:
                     print_red("❌ Too many failed attempts.")
@@ -136,7 +136,7 @@ class PaxWalletCLI:
     # ============================================================
     
     def run(self):
-        """Starts the main loop"""
+        """Start the main loop"""
         if not self._unlock():
             print_red("❌ Cannot start PAX Wallet")
             return
@@ -164,7 +164,7 @@ class PaxWalletCLI:
         print_green("👋 Goodbye!")
     
     def _cleanup(self):
-        """Cleanup on exit"""
+        """Clean up on exit"""
         if self.backend and self.backend.reticulum:
             try:
                 if self.backend.metrics:
@@ -183,7 +183,7 @@ class PaxWalletCLI:
     # ============================================================
     
     def _show_main_menu(self):
-        """Shows the main menu"""
+        """Show main menu"""
         active = self.backend.get_active_wallet() if self.backend else {}
         status = self.backend.get_status() if self.backend else {}
         
@@ -213,7 +213,7 @@ class PaxWalletCLI:
         print("-" * 40)
     
     def _handle_main_choice(self, choice: str):
-        """Handles main menu choices"""
+        """Handle main menu choices"""
         if choice == '0':
             self._running = False
         elif choice == '1':
@@ -264,7 +264,7 @@ class PaxWalletCLI:
                 for i, w in enumerate(wallets, 1):
                     marker = "▶" if w.get("is_active") else " "
                     address = w.get("address", "unknown")
-                    # 🔥 Show full address
+                    # 🔥 DON'T TRUNCATE! Show COMPLETE address
                     print(f"    {i}. {marker} {w['name']:<15} ({w['crypto']} - {w['network']}) {address}")
             else:
                 print("    ❌ No saved wallets")
@@ -274,7 +274,7 @@ class PaxWalletCLI:
             print("  2) Import wallet")
             print("  3) Remove wallet")
             print("  4) Switch wallet")
-            print("  0) Back to main menu")
+            print("  0) Return to main menu")
             print("-" * 50)
             
             sub = input("\nChoice: ").strip()
@@ -297,7 +297,7 @@ class PaxWalletCLI:
     # ============================================================
     
     def _cmd_create(self):
-        """Create a new wallet with strength and passphrase support"""
+        """Create a new wallet with support for strength and passphrase"""
         name = input("Name (default): ").strip() or "default"
         crypto = input("Crypto (XRP/XLM): ").strip().upper() or "XRP"
         network = input("Network (testnet/mainnet): ").strip().lower() or "testnet"
@@ -308,8 +308,8 @@ class PaxWalletCLI:
         choice = input("   Choice (1 or 2, default 2): ").strip()
         strength = 128 if choice == "1" else 256
         
-        print("\n   🔐 Passphrase (optional, press Enter to skip):")
-        print("      If forgotten, the wallet is unrecoverable.")
+        print("\n   🔐 Passphrase (optional, Enter to skip):")
+        print("      If you forget it, the wallet is unrecoverable.")
         passphrase = getpass.getpass("   Passphrase: ").strip()
         if passphrase:
             confirm = getpass.getpass("   Confirm passphrase: ").strip()
@@ -320,7 +320,7 @@ class PaxWalletCLI:
         else:
             print_yellow("   ⚠️ No passphrase")
         
-        # 🔥 Pass strength and passphrase to backend
+        # 🔥 PASS strength AND passphrase TO BACKEND
         result = self.backend.create_wallet(name, crypto, network, strength=strength, passphrase=passphrase)
         
         if result.get("success"):
@@ -330,8 +330,8 @@ class PaxWalletCLI:
             print(f"   Word Count: {result.get('word_count', 0)}")
             if passphrase:
                 print(f"   Passphrase: {'*' * len(passphrase)}")
-                print_yellow("\n   ⚠️ ATTENTION: The passphrase is NOT stored in the wallet!")
-                print_yellow("   Store it in a safe place, SEPARATE from the seed.")
+                print_yellow("\n   ⚠️ WARNING: Passphrase is NOT stored in the wallet!")
+                print_yellow("   Keep it in a safe place, SEPARATE from the seed.")
                 print_yellow("   Without the passphrase you CANNOT recover the wallet.")
             print(f"   Seed: {result.get('seed', 'N/A')}")
         else:
@@ -343,13 +343,13 @@ class PaxWalletCLI:
         if not seed:
             return
         
-        # 🔥 Detect if it's a mnemonic
+        # 🔥 DETECT IF IT'S A MNEMONIC
         words = seed.strip().split()
         is_mnemonic = len(words) in [12, 24] and all(w.isalpha() for w in words)
         
         passphrase = ""
         if is_mnemonic:
-            print("\n   🔐 Passphrase (optional, press Enter to skip):")
+            print("\n   🔐 Passphrase (optional, Enter to skip):")
             print("      Enter the passphrase if the wallet was created with one.")
             passphrase = getpass.getpass("   Passphrase: ").strip()
             if passphrase:
@@ -361,7 +361,7 @@ class PaxWalletCLI:
         crypto = input("Crypto (auto/XRP/XLM): ").strip().upper() or "auto"
         network = input("Network (testnet/mainnet): ").strip().lower() or "testnet"
         
-        # 🔥 Pass passphrase to backend
+        # 🔥 PASS PASSPHRASE TO BACKEND
         result = self.backend.import_wallet(seed, name, crypto, network, passphrase=passphrase)
         if result.get("success"):
             print_green(f"\n✅ Wallet imported!")
@@ -392,7 +392,7 @@ class PaxWalletCLI:
         if 0 <= idx < len(wallets):
             name = wallets[idx]["name"]
             if wallets[idx].get("is_active"):
-                print_red("❌ Cannot remove active wallet")
+                print_red("❌ Cannot remove the active wallet")
                 return
             confirm = input(f"   Remove '{name}'? (y/N): ").strip().lower()
             if confirm == 'y':
@@ -413,7 +413,7 @@ class PaxWalletCLI:
         for i, w in enumerate(wallets, 1):
             marker = "▶" if w.get("is_active") else " "
             address = w.get("address", "unknown")
-            # 🔥 Full address
+            # 🔥 COMPLETE ADDRESS
             print(f"  {i}. {marker} {w['name']} ({w['crypto']} - {w['network']}) {address}")
         
         choice = input("\nWallet number (or Enter): ").strip()
@@ -425,7 +425,7 @@ class PaxWalletCLI:
             name = wallets[idx]["name"]
             result = self.backend.switch_wallet(name)
             if result.get("success"):
-                print_green(f"✅ Switched to wallet: {name}")
+                print_green(f"✅ Wallet switched to: {name}")
                 print_yellow(f"   Network: {result.get('network', 'testnet').upper()} | Crypto: {result.get('crypto', 'XRP')}")
             else:
                 print_red(f"❌ {result.get('message', 'Error')}")
@@ -451,7 +451,7 @@ class PaxWalletCLI:
             print_red(f"❌ {result.get('message', 'Error')}")
     
     def _cmd_derive(self):
-        """Derive addresses - formatted table"""
+        """Derive addresses - FORMATTED AS TABLE"""
         keyword = input("Keyword (default): ").strip() or "default"
         count = int(input("Count (5): ").strip() or "5")
         
@@ -492,7 +492,7 @@ class PaxWalletCLI:
     
     def _cmd_send(self):
         """Send payment"""
-        to_addr = input("Destination address: ").strip()
+        to_addr = input("Recipient address: ").strip()
         if not to_addr:
             return
         try:
@@ -504,7 +504,7 @@ class PaxWalletCLI:
         
         result = self.backend.send_payment(to_addr, amount, memo)
         
-        # 🔥 If via Reticulum, show in blue
+        # 🔥 IF VIA RETICULUM, SHOW IN BLUE
         if result.get("via_reticulum", False):
             print_blue(f"📡 Transaction request via Reticulum")
         
@@ -546,7 +546,7 @@ class PaxWalletCLI:
             print_red(f"❌ {result.get('message', 'Error')}")
     
     def _cmd_history(self):
-        """Transaction history - format and print"""
+        """Transaction history - FORMAT AND PRINT"""
         limit = int(input("Number of transactions (10): ").strip() or "10")
         result = self.backend.get_history(limit)
         
@@ -561,7 +561,7 @@ class PaxWalletCLI:
             print_yellow("❌ No transactions found.")
             return
         
-        # 🔥 Format and print
+        # 🔥 FORMAT AND PRINT (uses parse_tx_date imported)
         self._print_transactions(transactions, address)
         
         # Show explorer
@@ -589,7 +589,7 @@ class PaxWalletCLI:
                 continue
             
             tx_type = tx.get("TransactionType", "Unknown")
-            date_str = parse_tx_date(tx, tx_data)  # <-- Uses global function
+            date_str = parse_tx_date(tx, tx_data)  # <-- USE GLOBAL FUNCTION
             
             fee_drops = tx.get("Fee", "0")
             try:
@@ -715,7 +715,7 @@ class PaxWalletCLI:
         """Change password"""
         old = getpass.getpass("Current password: ")
         if old != self._password:
-            print_red("❌ Wrong password")
+            print_red("❌ Incorrect password")
             return
         new = getpass.getpass("New password: ")
         confirm = getpass.getpass("Confirm password: ")
@@ -741,7 +741,7 @@ class PaxWalletCLI:
             print("  2) Create trustline")
             print("  3) Remove trustline")
             print("  4) Trustline info")
-            print("  0) Back to main menu")
+            print("  0) Return to main menu")
             
             sub = input("\nChoice: ").strip()
             
@@ -759,7 +759,7 @@ class PaxWalletCLI:
                 print_red("❌ Invalid choice")
     
     def _cmd_trustlines(self):
-        """Show trustlines - formatted like other tables"""
+        """Show trustlines - FORMATTED LIKE OTHER TABLES"""
         result = self.backend.get_trustlines()
         if result.get("success"):
             trustlines = result.get("trustlines", [])
@@ -767,7 +767,7 @@ class PaxWalletCLI:
                 print_yellow("❌ No trustlines found")
                 return
             
-            # 🔥 Determine network
+            # 🔥 DETERMINE NETWORK
             network = "MAINNET" if self.backend.wallet._xrp_manager.network == "mainnet" else "TESTNET"
             crypto = self.backend.wallet._xrp_manager.crypto_type
             
@@ -783,7 +783,7 @@ class PaxWalletCLI:
                 limit = tl.get('limit', 0)
                 is_active = tl.get('is_active', False)
                 
-                # 🔥 Format numbers
+                # 🔥 FORMAT NUMBERS
                 try:
                     bal_str = f"{float(balance):.6f}".rstrip('0').rstrip('.')
                     if not bal_str:
@@ -798,7 +798,7 @@ class PaxWalletCLI:
                 except:
                     lim_str = str(limit)
                 
-                # 🔥 Status
+                # 🔥 STATUS
                 if is_active:
                     status = "✅ Active"
                 elif balance > 0:
@@ -806,7 +806,7 @@ class PaxWalletCLI:
                 else:
                     status = "⏳ Pending"
                 
-                # 🔥 Truncate issuer if too long
+                # 🔥 TRUNCATE ISSUER IF TOO LONG
                 issuer_display = issuer if len(issuer) <= 34 else issuer[:32] + "..."
                 
                 print(f"{i:<4} {asset:<12} {issuer_display:<36} {bal_str:<16} {lim_str:<14} {status}")
@@ -859,12 +859,12 @@ class PaxWalletCLI:
             print_red(f"❌ {result.get('message', 'Error')}")
     
     # ============================================================
-    # TOKENS
+    # TOKEN
     # ============================================================
     
     def _cmd_send_token(self):
         """Send token"""
-        to_addr = input("Destination address: ").strip()
+        to_addr = input("Recipient address: ").strip()
         if not to_addr:
             return
         token = input("Token name (e.g. Arg0): ").strip()
@@ -877,7 +877,7 @@ class PaxWalletCLI:
             return
         issuer = input("Issuer (optional): ").strip() or None
         
-        # 🔥 Ask for destination tag
+        # 🔥 ASK FOR DESTINATION TAG
         dest_tag_input = input("Destination Tag (optional, number): ").strip()
         dest_tag = int(dest_tag_input) if dest_tag_input else None
         
@@ -897,13 +897,27 @@ class PaxWalletCLI:
             status = self.backend.get_status()
             internet_status = "🌐 ON" if self.backend.use_internet else "📡 OFF (Reticulum)"
             
+            # 🔥 TOR STATUS ALWAYS VISIBLE
+            tor_status = "🧅 ON" if self.backend.use_tor else "🧅 OFF"
+            tor_reachable = "✅" if self.backend._test_tor() else "❌"
+            
+            # IP only if internet is ON
+            if self.backend.use_internet:
+                ip_info = self.backend.get_ip_status()
+                ip = ip_info.get("ip", "N/A")
+                ip_display = f"{ip} ({tor_status})"
+            else:
+                ip_display = "⛔ N/A (Reticulum)"
+            
             print("\n" + "=" * 50)
             print("  📡 RETICULUM")
             print("=" * 50)
             print(f"  Gateway: {'✅ Active' if status.get('gateway_active') else '❌ Stopped'}")
             print(f"  Known peers: {status.get('wallet_count', 0)}")
             print(f"  Internet mode: {internet_status}")
-            
+            print(f"  TOR: {tor_status} {tor_reachable}")
+            print(f"  Public IP: {ip_display}")
+
             print("\n" + "-" * 50)
             print("  1) Gateway status")
             print("  2) Start gateway")
@@ -915,8 +929,9 @@ class PaxWalletCLI:
             print("  8) Request gateway info")
             print("  9) Test all gateways")
             print(" 10) 🌐 Toggle internet (use Reticulum)")
-            print(" 11) 🗑️ Remove gateway manually")
-            print("  0) Back to main menu")
+            print(" 11) 🧅 Toggle TOR (use anonymous network)")
+            print(" 12) 🗑️ Remove gateway manually")
+            print("  0) Return to main menu")
             print("-" * 50)
             
             sub = input("\nChoice: ").strip()
@@ -944,15 +959,21 @@ class PaxWalletCLI:
             elif sub == '10':
                 self._cmd_toggle_internet()
             elif sub == '11':
+                self._cmd_toggle_tor()
+            elif sub == '12':
                 self._cmd_remove_gateway()
             else:
                 print_red("❌ Invalid choice")
     
     def _cmd_gateway_status(self):
-        """Gateway status"""
+        """Gateway status with IP and TOR status"""
         result = self.backend.get_gateway_status()
         if result.get("success"):
             status = result.get("status", {})
+            
+            # 🔥 REAL-TIME TOR TEST
+            tor_reachable = "✅" if self.backend._test_tor() else "❌"
+            
             print_bold("\n📊 GATEWAY STATUS")
             print("=" * 60)
             print(f"   Running: {status.get('running', False)}")
@@ -964,6 +985,18 @@ class PaxWalletCLI:
             print(f"   Wallet Address: {status.get('wallet_address', 'N/A')}")
             print(f"   Gateway Count: {status.get('gateway_count', 0)}")
             print(f"   Wallet Count: {status.get('wallet_count', 0)}")
+            
+            # 🔥 SHOW IP AND TOR STATUS
+            public_ip = status.get('public_ip', 'N/A')
+            use_tor = status.get('use_tor', False)
+            internet_on = status.get('internet_on', True)
+            
+            tor_status = "🧅 TOR ON" if use_tor else "🌐 Direct"
+            internet_status = "🌐 ON" if internet_on else "📡 OFF (Reticulum)"
+            
+            print(f"   TOR: {tor_status} {tor_reachable}")
+            print(f"   Public IP: {public_ip} ({tor_status})")
+            print(f"   Internet: {internet_status}")
             print("=" * 60)
         else:
             print_red(f"❌ {result.get('message', 'Error')}")
@@ -985,7 +1018,7 @@ class PaxWalletCLI:
             print_red(f"❌ {result.get('message', 'Error')}")
     
     def _cmd_discover_gateways(self):
-        """Discover gateways - formatted"""
+        """Discover gateways - FORMATTED AS BEFORE"""
         result = self.backend.discover_gateways()
         
         if not result.get("success"):
@@ -1016,7 +1049,7 @@ class PaxWalletCLI:
         print("=" * 100)
 
     def _cmd_discover_wallets(self):
-        """Discover wallets - formatted"""
+        """Discover wallets - FORMATTED AS BEFORE"""
         result = self.backend.discover_wallets()
         
         if not result.get("success"):
@@ -1047,7 +1080,7 @@ class PaxWalletCLI:
         print("=" * 100)
     
     def _cmd_peer_metrics(self):
-        """Peer metrics - uses SCORE from backend"""
+        """Peer metrics - USE SCORE FROM BACKEND"""
         result = self.backend.get_peer_metrics()
         
         if not result.get("success"):
@@ -1059,15 +1092,15 @@ class PaxWalletCLI:
             print_yellow("⚠️ No known peers")
             return
         
-        print_bold(f"\n🔍 PEERS RANKED BY PERFORMANCE ({len(peers)})")
-        print("=" * 260)
-        print(f"{'#':<3} {'Name':<22} {'Score':<6} {'Rel':<6} {'Rep':<4} {'Hops':<5} {'RTT':<8} {'XRP':<14} {'Stellar':<14} {'Internet':<9} {'Last seen':<15} {'ID':<36} {'Assets'}")
-        print("-" * 260)
+        print_bold(f"\n🔍 PEERS ORDERED BY PERFORMANCE ({len(peers)})")
+        print("=" * 280)
+        # 🔥 ADD TOR COLUMN
+        print(f"{'#':<3} {'Name':<22} {'Score':<6} {'Rel':<6} {'Rep':<4} {'Hops':<5} {'RTT':<8} {'XRP':<14} {'Stellar':<14} {'Internet':<9} {'TOR':<6} {'Last Seen':<15} {'ID':<36} {'Assets'}")
+        print("-" * 280)
         
         for idx, p in enumerate(peers, 1):
-            # 🔥 Score already computed by backend
             sc = round(p.get('_score', 0))
-            name = str(p.get('name', 'UNKNOWN'))[:16]            
+            name = str(p.get('name', 'UNKNOWN'))[:16]
             rel = round(p.get('reliability', 0), 2)
             rep = p.get('reputation', 50)
             hops = str(p.get('hops', '?'))
@@ -1088,8 +1121,18 @@ class PaxWalletCLI:
                 stellar_str = "❌"
             
             internet = "🌐" if p.get('has_internet') else "📡"
-            last_seen = format_time_ago(p.get('last_seen'))  # <-- Use global function
+            last_seen = format_time_ago(p.get('last_seen'))
             gw_id = p.get('gateway_id', 'N/A')[:36]
+            
+            # 🔥 TOR STATUS
+            tor_enabled = p.get('tor_enabled', False)
+            tor_reachable = p.get('tor_reachable', False)
+            if tor_enabled and tor_reachable:
+                tor_str = "🧅✅"
+            elif tor_enabled:
+                tor_str = "🧅❌"
+            else:
+                tor_str = "—"
             
             assets = p.get('assets', [])
             if isinstance(assets, list):
@@ -1103,24 +1146,26 @@ class PaxWalletCLI:
             sc_color = Colors.GREEN if sc > 70 else Colors.YELLOW if sc > 40 else Colors.RED
             rel_color = Colors.GREEN if rel > 0.9 else Colors.YELLOW if rel > 0.7 else Colors.RED
             
-            print(f"{idx:<3} {name:<20} {sc_color}{sc:5.0f}{Colors.RESET} {rel_color}{rel:5.2f}{Colors.RESET} {rep:<4} {hops:<5} {rtt:<8} {xrp_str:<14} {stellar_str:<14} {internet:<9} {last_seen:<15} {gw_id:<36} {assets_str}")
+            print(f"{idx:<3} {name:<20} {sc_color}{sc:5.0f}{Colors.RESET} {rel_color}{rel:5.2f}{Colors.RESET} {rep:<4} {hops:<5} {rtt:<8} {xrp_str:<14} {stellar_str:<14} {internet:<9} {tor_str:<6} {last_seen:<15} {gw_id:<36} {assets_str}")
         
-        print("=" * 260)
+        print("=" * 280)
         
-        # Stats
         stats = result.get("stats", {})
         if stats:
             print(f"\n📊 Statistics:")
             print(f"   Total peers: {stats.get('total_peers', 0)}")
             print(f"   Online: {stats.get('online_peers', 0)}")
             print(f"   Offline: {stats.get('offline_peers', 0)}")
-            print(f"   Avg reputation: {round(stats.get('avg_reputation', 0), 1)}")
+            print(f"   Average reputation: {round(stats.get('avg_reputation', 0), 1)}")
             if stats.get('avg_latency_ms'):
-                print(f"   Avg Reticulum latency: {round(stats.get('avg_latency_ms'), 0)}ms")
+                print(f"   Average Reticulum latency: {round(stats.get('avg_latency_ms'), 0)}ms")
             if stats.get('avg_score'):
-                print(f"   Avg score: {round(stats.get('avg_score'))}")
+                print(f"   Average score: {round(stats.get('avg_score'))}")
+            # 🔥 ADD TOR STATISTICS
+            tor_peers = stats.get('tor_peers', 0)
+            if tor_peers > 0:
+                print(f"   Gateways with TOR: {tor_peers}")
         
-        # Best peer
         if peers:
             b = peers[0]
             best_score = b.get('_score', 0)
@@ -1131,11 +1176,20 @@ class PaxWalletCLI:
             print(f"   XRP: {'✅' if b.get('xrp_reachable') else '❌'} ({b.get('xrp_latency_ms', '?')}ms)")
             print(f"   Stellar: {'✅' if b.get('stellar_reachable') else '❌'} ({b.get('stellar_latency_ms', '?')}ms)")
             print(f"   Internet: {'✅' if b.get('has_internet') else '❌'}")
+            # 🔥 ADD TOR TO BEST PEER
+            tor_enabled = b.get('tor_enabled', False)
+            tor_reachable = b.get('tor_reachable', False)
+            if tor_enabled and tor_reachable:
+                print(f"   TOR: ✅ Active and reachable")
+            elif tor_enabled:
+                print(f"   TOR: ⚠️ Active but not reachable")
+            else:
+                print(f"   TOR: ❌ Not active")
             if b.get('assets'):
                 print(f"   Assets: {', '.join(b.get('assets', []))}")
     
     def _cmd_best_gateway(self):
-        """Best gateway - show all info"""
+        """Best gateway - SHOW ALL INFO"""
         asset = input("Asset (e.g. RLUSD): ").strip()
         if not asset:
             print_red("❌ Specify an asset")
@@ -1187,7 +1241,7 @@ class PaxWalletCLI:
             if fee != 'N/A':
                 print(f"   Fee:            {fee} {fee_asset}")
             
-            # RSSI/SNR if available
+            # RSSI/SNR (if available)
             if gw.get('rssi') is not None:
                 print(f"   RSSI:           {gw.get('rssi')}dBm")
             if gw.get('snr') is not None:
@@ -1198,12 +1252,12 @@ class PaxWalletCLI:
             print_red(f"❌ {result.get('message', 'Error')}")
     
     def _cmd_request_info(self):
-        """Request info from a specific gateway - uses discover_gateways()"""
+        """Request info from a specific gateway - USE discover_gateways()"""
         if not self.backend.metrics:
             print_red("❌ Metrics not available")
             return
         
-        # 🔥 Use backend's discover_gateways()
+        # 🔥 USE discover_gateways() FROM BACKEND
         result = self.backend.discover_gateways(active_only=False)
         
         if not result.get("success"):
@@ -1212,16 +1266,16 @@ class PaxWalletCLI:
         
         gateways = result.get("gateways", [])
         
-        # 🔥 Filter out own gateway
+        # 🔥 FILTER OWN GATEWAY
         my_id = self.backend.reticulum.gateway_address if hasattr(self.backend.reticulum, 'gateway_address') else None
         if my_id:
             gateways = [g for g in gateways if g.get('gateway_id') != my_id]
         
         if not gateways:
-            print_yellow("⚠️ Only own gateway found, no peers available")
+            print_yellow("⚠️ Only your own gateway found, no peers available")
             return
         
-        # 🔥 Show list with full address
+        # 🔥 SHOW LIST WITH COMPLETE ADDRESS
         print_blue("🔍 Available gateways:")
         print(f"   Found {len(gateways)} gateways (excluding self)")
         for i, gw in enumerate(gateways, 1):
@@ -1261,7 +1315,7 @@ class PaxWalletCLI:
     
     def _cmd_test_gateways(self):
         """Test all active gateways"""
-        print("\n📡 Testing all active gateways...")
+        print("\n📡 Testing all active gateways in progress...")
         print("   This will update peer data in the database.")
         print("   To see the ranking, use '6) Peer metrics'.\n")
         
@@ -1278,22 +1332,35 @@ class PaxWalletCLI:
             return
         
         print_bold(f"\n📊 TEST COMPLETED")
-        print("=" * 60)
+        print("=" * 80)
         print(f"   Gateways tested: {result.get('count', 0)}")
         print(f"   Responses received: {result.get('successful', 0)}")
-        print("=" * 60)
+        print("=" * 80)
         
-        # Simple table
+        # 🔥 TABLE WITH RETICULUM, INTERNET AND TOR STATUS
         print("\n📋 RESULTS:")
-        print("-" * 80)
-        print(f"{'#':<3} {'Name':<20} {'Status':<12} {'Hops':<6}")
-        print("-" * 80)
+        print("-" * 100)
+        print(f"{'#':<3} {'Name':<20} {'Reticulum':<12} {'Internet':<10} {'TOR':<8} {'Hops':<6}")
+        print("-" * 100)
         
         for idx, r in enumerate(results, 1):
-            print(f"{idx:<3} {r.get('name', 'UNKNOWN'):<20} {r.get('status', '?'):<12} {r.get('hops', '?'):<6}")
+            reticulum_status = "✅ ONLINE" if r.get('status') == "✅ ONLINE" else "❌ OFFLINE"
+            internet_status = "🌐 YES" if r.get('has_internet', False) else "📡 NO"
+            tor_status = r.get('tor_status', '—')
+            hops = r.get('hops', '?')
+            
+            print(f"{idx:<3} {r.get('name', 'UNKNOWN'):<20} {reticulum_status:<12} {internet_status:<10} {tor_status:<8} {hops:<6}")
         
-        print("-" * 80)
-        print_green("\n✅ Data updated! Use '6) Peer metrics' to see the full ranking.")
+        print("-" * 100)
+        print("\n📌 Legend:")
+        print("   Reticulum: ✅ ONLINE = reachable via Reticulum network")
+        print("   Internet:  🌐 YES  = gateway has internet access")
+        print("   Internet:  📡 NO   = gateway does NOT have internet access")
+        print("   TOR:       🧅✅   = TOR active and reachable")
+        print("   TOR:       🧅❌   = TOR active but not reachable")
+        print("   TOR:       —      = TOR not active")
+        
+        print_green("\n✅ Data updated! Use '6) Peer metrics' to see the complete ranking.")
 
     def _cmd_remove_gateway(self):
         """Remove a gateway manually from announce_cache and gateway_peers"""
@@ -1379,6 +1446,37 @@ class PaxWalletCLI:
         else:
             print_green("🌐 Internet mode enabled")
             print_yellow("   Operations will use direct connection")
+
+    def _cmd_toggle_tor(self):
+        """Toggle TOR (anonymous network)"""
+        current = self.backend.use_tor
+        
+        # If enabling TOR, verify it's reachable
+        if not current:
+            print_blue("🧅 Checking TOR connection...")
+            if not self.backend._test_tor():
+                print_yellow("⚠️ TOR is not responding on localhost:9050")
+                print_yellow("   Make sure TOR is running.")
+                print_yellow("   To start it: tor (in a separate terminal)")
+                confirm = input("   Enable anyway? (y/N): ").strip().lower()
+                if confirm != 'y':
+                    print_yellow("❌ TOR not enabled")
+                    return
+        
+        # Change state
+        self.backend.set_use_tor(not current)
+        
+        if current:
+            print_green("🧅 TOR disabled")
+            print_yellow("   Ledger connections will use direct internet")
+        else:
+            print_green("🧅 TOR enabled")
+            print_yellow("   Ledger connections will use TOR network (slower)")
+            # Final verification
+            if self.backend._test_tor():
+                print_green("✅ TOR reachable and working")
+            else:
+                print_yellow("⚠️ TOR not responding. Check the daemon.")
 
 # ============================================================
 # MAIN

@@ -57,6 +57,9 @@ class ReticulumConfig:
         self.gateway_name = "Gateway"
         self.wallet_name = "Wallet"
         self.use_internet = True
+        self.use_tor = False
+        self.tor_socks_port = 9050
+        self.tor_timeout_seconds = 30
         self.ledger_check_interval = 3600
         self.ledger_timeout_seconds = 5
         self.query_interval = 3600
@@ -82,6 +85,9 @@ class ReticulumConfig:
                 self.gateway_name = gw.get("name", self.gateway_name)
                 self.announce_interval = gw.get("announce_interval", self.announce_interval)
                 self.use_internet = gw.get("internet", "on").lower() == "on"
+                self.use_tor = gw.get("use_tor", "off").lower() == "on"
+                self.tor_socks_port = gw.get("tor_socks_port", 9050)
+                self.tor_timeout_seconds = gw.get("tor_timeout_seconds", 30)
                 self.ledger_check_interval = gw.get("ledger_check_interval", self.ledger_check_interval)
                 self.ledger_timeout_seconds = gw.get("ledger_timeout_seconds", self.ledger_timeout_seconds)
                 self.query_interval = gw.get("query_interval", self.query_interval)
@@ -308,6 +314,10 @@ class GatewayServerHandler:
                 print(f"📥 Richiesta ledger_relay: {data.get('operation')}")
                 response = self._process_ledger_relay(data)
                 if response:
+                    # 🔥 OTTIENI LO STATO TOR DA METRICS
+                    use_tor = self.metrics._use_tor if hasattr(self.metrics, '_use_tor') else False
+                    tor_reachable = self.metrics._tor_reachable if hasattr(self.metrics, '_tor_reachable') else False
+                    
                     response_data = {
                         "type": "ledger_relay_response",
                         "version": "1.0",
@@ -316,7 +326,9 @@ class GatewayServerHandler:
                         "result": response.get("result", {}),
                         "error": response.get("error"),
                         "timestamp": int(time.time()),
-                        "gateway_id": self._my_gateway_id
+                        "gateway_id": self._my_gateway_id,
+                        "tor_enabled": use_tor,
+                        "tor_reachable": tor_reachable
                     }
                     
                     response_bytes = json.dumps(response_data).encode()
@@ -434,8 +446,7 @@ class GatewayServerHandler:
             }
             client = JsonRpcClient(urls.get(network, urls["mainnet"]))
             
-            # 🔥 PASSA LA STRINGA HEX DIRETTAMENTE (NON BYTES!)
-            response = submit_and_wait(tx_blob, client)  # <-- tx_blob è stringa hex
+            response = submit_and_wait(tx_blob, client)
             
             return {
                 "hash": response.result.get("hash", "unknown"),
@@ -483,7 +494,7 @@ class GatewayServerHandler:
             result = self._handle_get_balance(payload)
         elif operation == "get_history":
             result = self._handle_get_history(payload)
-        elif operation == "submit_transaction":   # <-- AGGIUNGI QUESTO
+        elif operation == "submit_transaction":
             result = self._handle_submit_transaction(payload)
         elif operation == "send_payment":
             result = self._handle_send_payment(payload)
@@ -557,13 +568,13 @@ class GatewayServerHandler:
             account_data = response.result.get("account_data", {})
             sequence = account_data.get("Sequence", 0)
             balance = account_data.get("Balance", 0)
-            ledger_index = response.result.get("ledger_index", 0)   # <-- AGGIUNGI
+            ledger_index = response.result.get("ledger_index", 0)
             
             return {
                 "sequence": sequence,
                 "balance": balance,
                 "address": address,
-                "ledger_index": ledger_index   # <-- AGGIUNGI
+                "ledger_index": ledger_index
             }
         except Exception as e:
             return {"error": str(e)}
@@ -878,6 +889,9 @@ class ReticulumManager:
                 gateway_id=self.gateway_address
             )
             ReticulumManager._server_handler.start()
+            
+            # 🔥 PASSA TOR A METRICS
+            self.metrics.set_use_tor(self.config.use_tor)
         else:
             print("⚠️ Metrics non disponibile, server /info non avviato")
         
@@ -897,6 +911,7 @@ class ReticulumManager:
         print(f"   Gateway ID: {self.gateway_address}")
         print(f"   Nome: {self.config.gateway_name}")
         print(f"   Internet: {'ON' if self.config.use_internet else 'OFF'}")
+        print(f"   TOR: {'ON' if self.config.use_tor else 'OFF'}")
         
         if blocking:
             print("\n🔄 In esecuzione. Premi Ctrl+C per fermare.")
@@ -1099,6 +1114,7 @@ class ReticulumManager:
             "pid": self._pid,
             "started_at": self._started_at,
             "use_internet": self.config.use_internet,
+            "use_tor": self.config.use_tor,
             "has_internet": ledger_status.get("has_internet", False),
             "xrp_reachable": ledger_status.get("xrp", {}).get("reachable", False),
             "xrp_latency_ms": ledger_status.get("xrp", {}).get("latency_ms"),

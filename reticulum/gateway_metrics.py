@@ -2,6 +2,7 @@
 """
 gateway_metrics.py - Gestione metriche tra gateway (STANDARD RETICULUM)
 """
+
 import json5
 import sqlite3
 import json
@@ -43,6 +44,8 @@ class GatewayInfoResponse:
     latency_ms: Optional[float] = None
     hops: Optional[int] = None
     signature: str = ""
+    tor_enabled: bool = False
+    tor_reachable: bool = False
 
 
 def sign_message(message: dict, identity) -> str:
@@ -57,7 +60,7 @@ class GatewayMetrics:
     def __init__(self, identity, gateway_name: str = "Gateway", db_path: Path = Path("gateway_peers.db")):
         self.identity = identity
         self.db_path = db_path
-        self.gateway_name = gateway_name  # <-- RICEVE IL NOME!
+        self.gateway_name = gateway_name
         self.lock = threading.Lock()
         self._my_gateway_id = None
         self._running = False
@@ -67,6 +70,8 @@ class GatewayMetrics:
             "last_check": 0
         }
         self._use_internet = True
+        self._use_tor = False
+        self._tor_reachable = False
         self._ledger_timeout = 5
         self._ledger_check_interval = 3600
         self._init_db()
@@ -76,6 +81,24 @@ class GatewayMetrics:
         self._ledger_cache["last_check"] = 0
         self._ledger_cache["data"] = None
         print(f"📡 Internet impostato a: {'ON' if use_internet else 'OFF'}")
+    
+    def set_use_tor(self, use_tor: bool):
+        self._use_tor = use_tor
+        if use_tor:
+            try:
+                import socket
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(3)
+                sock.connect(('127.0.0.1', 9050))
+                sock.close()
+                self._tor_reachable = True
+                print("🧅 TOR raggiungibile")
+            except:
+                self._tor_reachable = False
+                print("🧅 TOR non raggiungibile")
+        else:
+            self._tor_reachable = False
+            print("🧅 TOR disattivato")
     
     def set_ledger_timeout(self, timeout: int):
         self._ledger_timeout = timeout
@@ -115,7 +138,9 @@ class GatewayMetrics:
                     rssi REAL,
                     snr REAL,
                     quality REAL,
-                    interface TEXT
+                    interface TEXT,
+                    tor_enabled BOOLEAN DEFAULT 0,
+                    tor_reachable BOOLEAN DEFAULT 0
                 )
             ''')
             
@@ -251,17 +276,14 @@ class GatewayMetrics:
             conn.close()
     
     # ============================================================
-    # COSTRUZIONE RISPOSTA - USA IL NOME DAL CONFIG!
+    # COSTRUZIONE RISPOSTA - CON TOR
     # ============================================================
     
     def build_info_response(self, client_latency_ms: float = None, client_hops: int = None) -> GatewayInfoResponse:
-        """Costruisce la risposta info usando self.gateway_name dal config"""
-        
-        # Se internet è disabilitato
         if not self._use_internet:
             return GatewayInfoResponse(
                 gateway_id=self._my_gateway_id or self.identity.hash.hex(),
-                name=self.gateway_name,  # <-- USA IL NOME CORRETTO!
+                name=self.gateway_name,
                 identity_hash=self.identity.hash.hex(),
                 networks=["xrpl", "stellar"],
                 assets=["XRP", "RLUSD", "XLM"],
@@ -277,14 +299,16 @@ class GatewayMetrics:
                 xrp_reachable=False,
                 stellar_reachable=False,
                 latency_ms=client_latency_ms,
-                hops=client_hops
+                hops=client_hops,
+                tor_enabled=self._use_tor,
+                tor_reachable=self._tor_reachable
             )
         
         ledger_status = self.get_ledger_status()
         
         return GatewayInfoResponse(
             gateway_id=self._my_gateway_id or self.identity.hash.hex(),
-            name=self.gateway_name,  # <-- USA IL NOME CORRETTO!
+            name=self.gateway_name,
             identity_hash=self.identity.hash.hex(),
             networks=["xrpl", "stellar"],
             assets=["XRP", "RLUSD", "XLM"],
@@ -300,7 +324,9 @@ class GatewayMetrics:
             xrp_reachable=ledger_status.get("xrp", {}).get("reachable", False),
             stellar_reachable=ledger_status.get("stellar", {}).get("reachable", False),
             latency_ms=client_latency_ms,
-            hops=client_hops
+            hops=client_hops,
+            tor_enabled=self._use_tor,
+            tor_reachable=self._tor_reachable
         )
     
     # ============================================================
@@ -332,6 +358,8 @@ class GatewayMetrics:
                 "stellar_reachable": response.stellar_reachable,
                 "latency_ms": response.latency_ms,
                 "hops": response.hops,
+                "tor_enabled": response.tor_enabled,
+                "tor_reachable": response.tor_reachable,
                 "signature": sign_message({
                     "gateway_id": response.gateway_id,
                     "name": response.name,
@@ -350,7 +378,9 @@ class GatewayMetrics:
                     "xrp_reachable": response.xrp_reachable,
                     "stellar_reachable": response.stellar_reachable,
                     "latency_ms": response.latency_ms,
-                    "hops": response.hops
+                    "hops": response.hops,
+                    "tor_enabled": response.tor_enabled,
+                    "tor_reachable": response.tor_reachable
                 }, self.identity)
             }
             return json.dumps(response_dict)
@@ -380,8 +410,9 @@ class GatewayMetrics:
                      version, has_internet, reputation, last_updated, query_success, 
                      query_attempts, is_online,
                      xrp_latency_ms, stellar_latency_ms, xrp_reachable, stellar_reachable,
-                     latency_ms, hops, last_seen)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, 1, ?, ?, ?, ?, ?, ?, ?)
+                     latency_ms, hops, last_seen,
+                     tor_enabled, tor_reachable)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (
                     info.get("gateway_id", ""),
                     info.get("name", "UNKNOWN"),
@@ -400,7 +431,9 @@ class GatewayMetrics:
                     1 if info.get("stellar_reachable", False) else 0,
                     info.get("latency_ms", None),
                     info.get("hops", None),
-                    now
+                    now,
+                    1 if info.get("tor_enabled", False) else 0,
+                    1 if info.get("tor_reachable", False) else 0
                 ))
                 
                 c.execute('''
@@ -581,7 +614,9 @@ class GatewayMetrics:
                     rssi,
                     snr,
                     quality,
-                    interface
+                    interface,
+                    tor_enabled,
+                    tor_reachable
                 FROM gateway_peers
                 ORDER BY is_online DESC, reputation DESC, hops ASC
             ''')
@@ -618,6 +653,10 @@ class GatewayMetrics:
                         peer['assets'] = json.loads(peer['assets'])
                     except:
                         peer['assets'] = []
+                
+                # 🔥 CONVERTI TOR IN BOOLEAN
+                peer['tor_enabled'] = bool(peer.get('tor_enabled', False))
+                peer['tor_reachable'] = bool(peer.get('tor_reachable', False))
                 result.append(peer)
             return result
 
@@ -650,10 +689,12 @@ class GatewayMetrics:
                     stellar_reachable,
                     rssi,
                     snr,
-                    quality
+                    quality,
+                    tor_enabled,
+                    tor_reachable
                 FROM gateway_peers
                 WHERE is_online = 1
-                  AND has_internet = 1   -- <-- AGGIUNGI QUESTO!
+                  AND has_internet = 1
             '''
             params = []
             
@@ -686,6 +727,8 @@ class GatewayMetrics:
                         peer['assets'] = json.loads(peer['assets'])
                     except:
                         peer['assets'] = []
+                peer['tor_enabled'] = bool(peer.get('tor_enabled', False))
+                peer['tor_reachable'] = bool(peer.get('tor_reachable', False))
                 return peer
             return None
     
@@ -824,6 +867,8 @@ class GatewayMetrics:
             avg_latency = c.fetchone()[0]
             c.execute('SELECT AVG(rssi) FROM gateway_peers WHERE is_online = 1 AND rssi IS NOT NULL')
             avg_rssi = c.fetchone()[0]
+            c.execute('SELECT COUNT(*) FROM gateway_peers WHERE is_online = 1 AND tor_enabled = 1 AND tor_reachable = 1')
+            tor_peers = c.fetchone()[0]
             conn.close()
             
             return {
@@ -831,5 +876,6 @@ class GatewayMetrics:
                 "online_peers": online,
                 "avg_reputation": round(avg_reputation, 2),
                 "avg_latency_ms": round(avg_latency, 2) if avg_latency else None,
-                "avg_rssi": round(avg_rssi, 2) if avg_rssi else None
+                "avg_rssi": round(avg_rssi, 2) if avg_rssi else None,
+                "tor_peers": tor_peers
             }

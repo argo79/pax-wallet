@@ -17,7 +17,7 @@ import threading
 # ============================================================
 # VERSIONE
 # ============================================================
-VERSION = "0.9.3b"
+VERSION = "0.10.1b"
 __version__ = VERSION
 
 # ============================================================
@@ -184,7 +184,19 @@ class WalletBackend:
         # 🔥 LEGGI IL FLAG INTERNET DAL CONFIG
         self.use_internet = getattr(self.reticulum_config, 'use_internet', True)
         print_green(f"🌐 Modalità internet: {'ON' if self.use_internet else 'OFF (Reticulum)'}")
+
+        # 🔥 LEGGI IL FLAG TOR DAL CONFIG
+        self.use_tor = getattr(self.reticulum_config, 'use_tor', False)
+        self.tor_socks_port = getattr(self.reticulum_config, 'tor_socks_port', 9050)
+        self.tor_timeout_seconds = getattr(self.reticulum_config, 'tor_timeout_seconds', 30)
+
+        if self.use_tor:
+            print_blue(f"🧅 TOR attivo su localhost:{self.tor_socks_port}")
+        else:
+            print_green("🧅 TOR: OFF")
         
+        self._update_proxy()
+
         # 🔥 PATCH PER COMPATIBILITÀ - USA IL VALORE DAL CONFIG!
         discover_since = getattr(self.reticulum_config, 'discover_since_seconds', 86400)
         
@@ -290,30 +302,108 @@ class WalletBackend:
         print_green(f"🌐 Internet: {'ON' if enabled else 'OFF'} (usa Reticulum)")
         return True
 
+    def _update_proxy(self):
+        """Imposta le variabili d'ambiente per proxy SOCKS5 se TOR è attivo."""
+        if self.use_tor:
+            proxy = f"socks5h://127.0.0.1:{self.tor_socks_port}"
+            os.environ['HTTP_PROXY'] = proxy
+            os.environ['HTTPS_PROXY'] = proxy
+            print_blue(f"🧅 TOR attivo: proxy su {proxy}")
+        else:
+            os.environ.pop('HTTP_PROXY', None)
+            os.environ.pop('HTTPS_PROXY', None)
+            print_green("🌐 TOR disattivato, connessione diretta")
+        self._client = None  # invalida il client
+
+    def _test_tor(self) -> bool:
+        """Verifica se TOR è raggiungibile (test socket veloce)."""
+        if not self.use_tor:
+            return False
+        try:
+            import socket
+            # Prova su 127.0.0.1
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(3)
+            sock.connect(('127.0.0.1', self.tor_socks_port))
+            sock.close()
+            return True
+        except Exception:
+            # Se fallisce su 127.0.0.1, prova su localhost
+            try:
+                import socket
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(3)
+                sock.connect(('localhost', self.tor_socks_port))
+                sock.close()
+                return True
+            except:
+                return False
+
+    def set_use_tor(self, enabled: bool) -> bool:
+        """Attiva/disattiva TOR e salva la configurazione."""
+        self.use_tor = enabled
+        self._update_proxy()
+        # Salva nel file di configurazione
+        try:
+            import json
+            config_path = Path("annuncio_config.json")
+            if config_path.exists():
+                with open(config_path, 'r') as f:
+                    config = json.load(f)
+                config["gateway"]["use_tor"] = "on" if enabled else "off"
+                with open(config_path, 'w') as f:
+                    json.dump(config, f, indent=4)
+                print_green(f"🧅 Config TOR aggiornato: {'on' if enabled else 'off'}")
+            return True
+        except Exception as e:
+            print_red(f"❌ Errore salvataggio config TOR: {e}")
+            return False
+
+    def _get_public_ip(self) -> str:
+        """Ottiene l'IP pubblico (normale o via TOR)."""
+        try:
+            import requests
+            proxies = {}
+            if self.use_tor:
+                proxy = f"socks5h://127.0.0.1:{self.tor_socks_port}"
+                proxies = {'http': proxy, 'https': proxy}
+            r = requests.get("https://api.ipify.org?format=json", proxies=proxies, timeout=10)
+            if r.status_code == 200:
+                return r.json().get("ip", "N/A")
+        except:
+            pass
+        return "N/A"
 
     # ============================================================
     # RETICULUM - RPC PER OPERAZIONI LEDGER
     # ============================================================
 
     def _select_best_gateway(self) -> Optional[Dict]:
-        """Seleziona il miglior gateway per operazioni Reticulum (online + con internet)"""
+        """Seleziona il miglior gateway.
+           Se TOR è attivo, usa SOLO gateway con TOR.
+        """
         if not self.metrics:
             return None
         
-        # Prendi tutti i peer
         peers = self.metrics.get_all_peers()
         
-        # Filtra: solo online e con internet (per fare da relay)
-        candidates = [p for p in peers if p.get('is_online') and p.get('has_internet')]
-        
-        if not candidates:
-            # Se nessuno ha internet, prendi il miglior peer online (ma non sarà utile)
-            candidates = [p for p in peers if p.get('is_online')]
+        # 🔥 FILTRA IN BASE A TOR
+        if self.use_tor:
+            candidates = [p for p in peers if p.get('is_online') and p.get('tor_enabled') and p.get('tor_reachable')]
+            if not candidates:
+                print_red("🧅 TOR ON: NESSUN gateway con TOR disponibile!")
+                print_yellow("   La transazione non può essere inviata in modo anonimo.")
+                return None
+            print_blue(f"🧅 TOR ON: usando {len(candidates)} gateway con TOR")
+        else:
+            # TOR OFF: comportamento normale
+            candidates = [p for p in peers if p.get('is_online') and p.get('has_internet')]
+            if not candidates:
+                candidates = [p for p in peers if p.get('is_online')]
         
         if not candidates:
             return None
         
-        # Ordina per score (calcolato da get_peer_metrics)
         candidates.sort(key=lambda p: p.get('_score', 0), reverse=True)
         return candidates[0]
 
@@ -449,6 +539,103 @@ class WalletBackend:
             return None
 
 
+    def get_balance(self, refresh: bool = True) -> Dict[str, Any]:
+        """Ottiene il saldo - usa internet o reticulum in base al config"""
+        if not self.wallet or not self.wallet._xrp_manager:
+            return {"success": False, "balance": 0.0, "crypto": "XRP", "message": "No wallet"}
+        
+        self._ensure_correct_network()
+        manager = self.wallet._xrp_manager
+        
+        # 🔥 SE INTERNET OFF, USA RETICULUM (CON CONTROLLO TOR)
+        if not self.use_internet:
+            # 🔥 CONTROLLO DIRETTO: SE TOR ON, VERIFICA GATEWAY TOR
+            if self.use_tor and self.metrics:
+                peers = self.metrics.get_all_peers()
+                tor_gateways = [p for p in peers if p.get('is_online') and p.get('tor_enabled') and p.get('tor_reachable')]
+                if not tor_gateways:
+                    print_red("🧅 TOR ON: NESSUN gateway con TOR disponibile!")
+                    print_yellow("   Le operazioni anonime non sono possibili.")
+                    return {"success": False, "balance": 0.0, "crypto": "XRP", "message": "Nessun gateway TOR disponibile"}
+            return self._get_balance_reticulum()
+        
+        # 🔥 ALTRIMENTI USA INTERNET
+        if manager.crypto_type == "XLM" and XLM_AVAILABLE:
+            try:
+                balance = manager.get_balance(refresh)
+                return {"success": True, "balance": balance, "crypto": "XLM", "message": "OK"}
+            except Exception as e:
+                return {"success": False, "balance": 0.0, "crypto": "XLM", "message": str(e)}
+        
+        try:
+            balance = manager.get_balance(refresh)
+            return {"success": True, "balance": balance, "crypto": "XRP", "message": "OK"}
+        except Exception as e:
+            return {"success": False, "balance": 0.0, "crypto": "XRP", "message": str(e)}
+
+    def get_history(self, limit: int = 10) -> Dict[str, Any]:
+        """Ottiene lo storico transazioni - usa internet o reticulum in base al config"""
+        if not self.wallet or not self.wallet._xrp_manager:
+            return {"success": False, "transactions": [], "count": 0, "message": "No wallet"}
+        
+        self._ensure_correct_network()
+        manager = self.wallet._xrp_manager
+        
+        # 🔥 SE INTERNET OFF, USA RETICULUM (CON CONTROLLO TOR)
+        if not self.use_internet:
+            # 🔥 CONTROLLO DIRETTO: SE TOR ON, VERIFICA GATEWAY TOR
+            if self.use_tor and self.metrics:
+                peers = self.metrics.get_all_peers()
+                tor_gateways = [p for p in peers if p.get('is_online') and p.get('tor_enabled') and p.get('tor_reachable')]
+                if not tor_gateways:
+                    print_red("🧅 TOR ON: NESSUN gateway con TOR disponibile!")
+                    print_yellow("   Le operazioni anonime non sono possibili.")
+                    return {"success": False, "transactions": [], "count": 0, "message": "Nessun gateway TOR disponibile"}
+            return self._get_history_reticulum(limit)
+        
+        # 🔥 ALTRIMENTI USA INTERNET (CODICE ORIGINALE INALTERATO)
+        if manager.crypto_type == "XLM" and XLM_AVAILABLE:
+            return {"success": False, "transactions": [], "count": 0, "message": "XLM history not implemented in backend"}
+        
+        address = manager.get_address()
+        network = manager.network
+        
+        try:
+            from xrpl.models.requests import AccountTx
+            from xrpl.models.response import ResponseStatus
+            from xrpl.clients import JsonRpcClient
+            
+            urls = {
+                "mainnet": "https://s1.ripple.com:51234/",
+                "testnet": "https://s.altnet.rippletest.net:51234/",
+                "devnet": "https://s.devnet.rippletest.net:51234/"
+            }
+            client = JsonRpcClient(urls.get(network, urls["testnet"]))
+            request = AccountTx(
+                account=address,
+                ledger_index_min=-1,
+                ledger_index_max=-1,
+                limit=limit,
+                forward=False
+            )
+            response = client.request(request)
+            
+            if response.status != ResponseStatus.SUCCESS:
+                return {"success": False, "transactions": [], "count": 0, "message": str(response.status)}
+            
+            transactions = response.result.get("transactions", [])
+            
+            return {
+                "success": True,
+                "transactions": transactions,
+                "count": len(transactions),
+                "address": address,
+                "network": network,
+                "message": "OK"
+            }
+        except Exception as e:
+            return {"success": False, "transactions": [], "count": 0, "message": str(e)}
+
     def _get_balance_reticulum(self) -> Dict[str, Any]:
         """Ottiene il saldo via Reticulum da un gateway"""
         if not self.reticulum or not self.metrics:
@@ -540,6 +727,7 @@ class WalletBackend:
             "count": 0,
             "message": response.get("error", "Errore richiesta Reticulum")
         }
+
     # ============================================================
     # UTILITY
     # ============================================================
@@ -1194,13 +1382,18 @@ class WalletBackend:
         if manager.crypto_type == "XLM" and XLM_AVAILABLE:
             return self._send_xlm(to_address, amount, memo)
         
-        # 🔥 SE INTERNET OFF, USA RETICULUM
         if not self.use_internet:
+            # 🔥 CONTROLLO DIRETTO: SE TOR ON, VERIFICA GATEWAY TOR
+            if self.use_tor and self.metrics:
+                peers = self.metrics.get_all_peers()
+                tor_gateways = [p for p in peers if p.get('is_online') and p.get('tor_enabled') and p.get('tor_reachable')]
+                if not tor_gateways:
+                    print_red("🧅 TOR ON: NESSUN gateway con TOR disponibile!")
+                    return {"success": False, "tx_hash": "", "message": "Nessun gateway TOR disponibile"}
             result = self._send_payment_reticulum(to_address, amount, memo)
-            result["via_reticulum"] = True  # 🔥 Flag per il frontend
+            result["via_reticulum"] = True
             return result
         
-        # ALTRIMENTI USA INTERNET
         return self._send_xrp(to_address, amount, memo)
     
     def _send_xlm(self, to_address: str, amount: float, memo: str) -> Dict[str, Any]:
@@ -1649,10 +1842,31 @@ class WalletBackend:
     # RETICULUM - PUBBLICHE
     # ============================================================
     
+    def get_ip_status(self) -> Dict[str, Any]:
+        """Restituisce IP e stato per il menu."""
+        if not self.use_internet:
+            return {
+                "ip": "N/A (Reticulum)",
+                "use_tor": self.use_tor,
+                "use_internet": self.use_internet
+            }
+        return {
+            "ip": self._get_public_ip(),
+            "use_tor": self.use_tor,
+            "use_internet": self.use_internet
+        }
+
     def get_gateway_status(self) -> Dict[str, Any]:
         if not self.reticulum:
             return {"success": False, "message": "Reticulum not available"}
         status = self.reticulum.get_status()
+        # 🔥 IP VISIBILE SOLO SE INTERNET È ON
+        if self.use_internet:
+            status["public_ip"] = self._get_public_ip()
+        else:
+            status["public_ip"] = "N/A (Reticulum)"
+        status["use_tor"] = self.use_tor
+        status["internet_on"] = self.use_internet
         return {"success": True, "status": status, "message": "OK"}
     
     def start_gateway(self) -> Dict[str, Any]:
@@ -1743,9 +1957,14 @@ class WalletBackend:
                 p['hops'] = gw.get('hops', p.get('hops', '?'))
                 if gw.get('last_seen', 0) > p.get('last_seen', 0):
                     p['last_seen'] = gw.get('last_seen')
+            
+            # 🔥 RECUPERA LO STATO TOR DAL PEER (se disponibile)
+            # (Il gateway deve includere tor_enabled e tor_reachable nella risposta)
+            p['tor_enabled'] = p.get('tor_enabled', False)
+            p['tor_reachable'] = p.get('tor_reachable', False)
             all_peers.append(p)
         
-        # 🔥 CALCOLA SCORE PER OGNI PEER
+        # 🔥 CALCOLA SCORE PER OGNI PEER (CON BONUS TOR)
         def calc_score(p):
             score = 0.0
             rel = p.get('reliability', 0)
@@ -1768,6 +1987,13 @@ class WalletBackend:
             if p.get('xrp_reachable'):   score += 5
             if p.get('stellar_reachable'): score += 5
             if p.get('has_internet'):    score += 3
+            
+            # 🔥 BONUS TOR: +10 se TOR è attivo e raggiungibile
+            if p.get('tor_enabled') and p.get('tor_reachable'):
+                score += 10
+            elif p.get('tor_enabled'):
+                score += 3  # Bonus minore se TOR è attivo ma non raggiungibile
+            
             return max(0, min(100, score))
         
         for p in all_peers:
@@ -1782,6 +2008,7 @@ class WalletBackend:
             "avg_reputation": sum(p.get('reputation', 0) for p in peers_sorted) / len(peers_sorted) if peers_sorted else 0,
             "avg_latency_ms": sum(p.get('latency_ms', 0) for p in peers_sorted if p.get('latency_ms')) / len(peers_sorted) if peers_sorted else 0,
             "avg_score": sum(p.get('_score', 0) for p in peers_sorted) / len(peers_sorted) if peers_sorted else 0,
+            "tor_peers": sum(1 for p in peers_sorted if p.get('tor_enabled') and p.get('tor_reachable')),
         }
         
         return {
@@ -1799,10 +2026,10 @@ class WalletBackend:
         return {"success": True, "gateway": best, "message": "OK"} if best else {"success": False, "message": "No gateway found"}
 
     def _show_single_peer(self, peer: Dict):
-        """Mostra un singolo peer in formato tabella - COMPLETO"""
+        """Mostra un singolo peer in formato tabella - COMPLETO (con TOR)"""
         print_bold(f"\n🔍 PEER: {peer.get('name', 'UNKNOWN')}")
         print("=" * 120)
-        print(f"{'ID':<38} {'Hops':<6} {'RTT':<10} {'XRP':<14} {'Stellar':<14} {'Rep':<5} {'Internet':<9} {'Ultimo visto':<15}")
+        print(f"{'ID':<38} {'Hops':<6} {'RTT':<10} {'XRP':<14} {'Stellar':<14} {'Rep':<5} {'Internet':<9} {'TOR':<6} {'Ultimo visto':<15}")
         print("-" * 120)
         
         gid = str(peer.get('gateway_id', 'N/A'))
@@ -1833,13 +2060,22 @@ class WalletBackend:
         rep = str(peer.get('reputation', 50))
         internet_icon = "🌐" if peer.get('has_internet', False) else "📡"
         
+        # 🔥 STATO TOR
+        tor_enabled = peer.get('tor_enabled', False)
+        tor_reachable = peer.get('tor_reachable', False)
+        if tor_enabled and tor_reachable:
+            tor_str = "🧅✅"
+        elif tor_enabled:
+            tor_str = "🧅❌"
+        else:
+            tor_str = "—"
+        
         last_seen = peer.get('last_seen')
         last_seen_str = format_time_ago(last_seen)
         
-        print(f"{gid:<38} {hops_str:<6} {latency_str:<10} {xrp_str:<14} {stellar_str:<14} {rep:<5} {internet_icon:<9} {last_seen_str:<15}")
+        print(f"{gid:<38} {hops_str:<6} {latency_str:<10} {xrp_str:<14} {stellar_str:<14} {rep:<5} {internet_icon:<9} {tor_str:<6} {last_seen_str:<15}")
         print("=" * 120)
         
-        # 🔥 MOSTRA ASSETS E FEE
         assets = peer.get('assets', [])
         if isinstance(assets, list) and assets:
             print(f"   Assets: {', '.join(assets)}")
@@ -1849,11 +2085,16 @@ class WalletBackend:
         if fee != 'N/A':
             print(f"   Fee: {fee} {fee_asset}")
         
-        # 🔥 MOSTRA REPUTATION E RELIABILITY (se non mostrati)
         if peer.get('reliability') is not None:
             print(f"   Reliability: {peer.get('reliability', 0):.2f}")
         if peer.get('networks'):
             print(f"   Networks: {', '.join(peer.get('networks', []))}")
+        
+        # 🔥 MOSTRA STATO TOR IN DETTAGLIO
+        if tor_enabled:
+            print(f"   TOR: {'✅ Raggiungibile' if tor_reachable else '⚠️ Non raggiungibile'}")
+        else:
+            print(f"   TOR: ❌ Non attivo")
 
     def request_gateway_info(self, gateway_id: str) -> Dict[str, Any]:
         """Richiede info a un gateway specifico e RESTITUISCE IL PEER AGGIORNATO"""
@@ -1878,14 +2119,11 @@ class WalletBackend:
         if not self.metrics:
             return {"success": False, "results": [], "count": 0, "message": "Metrics not available"}
         
-        # 🔥 PRENDE I GATEWAY DA discover_gateways (announce_cache)
         result = self.discover_gateways(active_only=True)
-        
         if not result.get("success"):
             return {"success": False, "results": [], "count": 0, "message": result.get("message", "Errore")}
         
         gateways = result.get("gateways", [])
-        
         if not gateways:
             return {"success": True, "results": [], "count": 0, "message": "Nessun gateway attivo trovato"}
         
@@ -1897,7 +2135,6 @@ class WalletBackend:
             gw_id = gw.get('gateway_id', '')
             name = gw.get('name', 'UNKNOWN')
             hops = gw.get('hops', '?')
-            # 🔥 PRENDI IL last_seen ORIGINALE DALLA CACHE!
             last_seen = gw.get('last_seen', int(time.time()))
             
             from datetime import datetime
@@ -1905,7 +2142,6 @@ class WalletBackend:
             print(f"[{timestamp}] 📡 Testando: {name} ({gw_id})")
             
             try:
-                # 🔥 USA GatewayMetrics.request_gateway_info()
                 success = self.metrics.request_gateway_info(gw_id)
                 tested += 1
                 
@@ -1913,11 +2149,31 @@ class WalletBackend:
                     successful += 1
                     status = "✅ ONLINE"
                     print(f"   ✅ Risposta ricevuta!")
+                    
+                    # 🔥 RECUPERA STATI DAL PEER
+                    peers = self.metrics.get_all_peers()
+                    has_internet = False
+                    tor_enabled = False
+                    tor_reachable = False
+                    for p in peers:
+                        if p.get('gateway_id') == gw_id:
+                            has_internet = p.get('has_internet', False)
+                            tor_enabled = p.get('tor_enabled', False)
+                            tor_reachable = p.get('tor_reachable', False)
+                            break
+                    
+                    if tor_enabled and tor_reachable:
+                        tor_status = "🧅✅"
+                    elif tor_enabled:
+                        tor_status = "🧅❌"
+                    else:
+                        tor_status = "—"
                 else:
                     status = "❌ OFFLINE"
+                    has_internet = False
+                    tor_status = "—"
                     print(f"   ❌ Nessuna risposta")
                     
-                    # 🔥 USA IL last_seen ORIGINALE DALLA CACHE!
                     try:
                         import sqlite3
                         conn = sqlite3.connect("gateway_peers.db")
@@ -1926,24 +2182,20 @@ class WalletBackend:
                             INSERT OR REPLACE INTO gateway_peers 
                             (gateway_id, name, hops, is_online, last_seen, reputation, reliability,
                              xrp_reachable, stellar_reachable, has_internet, assets, networks,
-                             latency_ms, fee, fee_asset)
-                            VALUES (?, ?, ?, 0, ?, 50, 0, 0, 0, 0, '[]', '[]', NULL, 'N/A', '')
-                        ''', (gw_id, name, hops, last_seen))  # <-- USA last_seen ORIGINALE!
+                             latency_ms, fee, fee_asset, tor_enabled, tor_reachable)
+                            VALUES (?, ?, ?, 0, ?, 50, 0, 0, 0, 0, '[]', '[]', NULL, 'N/A', '', 0, 0)
+                        ''', (gw_id, name, hops, last_seen))
                         conn.commit()
                         conn.close()
-                        
-                        # 🔥 MOSTRA L'ULTIMO VISTO LEGGIBILE
-                        from datetime import datetime as dt
-                        last_seen_str = dt.fromtimestamp(last_seen).strftime('%Y-%m-%d %H:%M:%S')
-                        print(f"   🔄 Peer {name} impostato come OFFLINE nel database (ultimo visto: {last_seen_str})")
-                    except Exception as e:
-                        print(f"   ⚠️ Errore aggiornamento DB: {e}")
+                    except:
+                        pass
                     
             except Exception as e:
                 status = f"❌ ERRORE"
+                has_internet = False
+                tor_status = "—"
                 print(f"   ❌ Errore: {e}")
                 
-                # 🔥 ANCHE IN CASO DI ERRORE, USA IL last_seen ORIGINALE!
                 try:
                     import sqlite3
                     conn = sqlite3.connect("gateway_peers.db")
@@ -1952,9 +2204,9 @@ class WalletBackend:
                         INSERT OR REPLACE INTO gateway_peers 
                         (gateway_id, name, hops, is_online, last_seen, reputation, reliability,
                          xrp_reachable, stellar_reachable, has_internet, assets, networks,
-                         latency_ms, fee, fee_asset)
-                        VALUES (?, ?, ?, 0, ?, 50, 0, 0, 0, 0, '[]', '[]', NULL, 'N/A', '')
-                    ''', (gw_id, name, hops, last_seen))  # <-- USA last_seen ORIGINALE!
+                         latency_ms, fee, fee_asset, tor_enabled, tor_reachable)
+                        VALUES (?, ?, ?, 0, ?, 50, 0, 0, 0, 0, '[]', '[]', NULL, 'N/A', '', 0, 0)
+                    ''', (gw_id, name, hops, last_seen))
                     conn.commit()
                     conn.close()
                 except:
@@ -1965,6 +2217,8 @@ class WalletBackend:
                 "gateway_id": gw_id,
                 "hops": hops,
                 "status": status,
+                "has_internet": has_internet,
+                "tor_status": tor_status
             })
         
         return {
