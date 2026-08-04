@@ -434,7 +434,8 @@ class WalletBackend:
         try:
             import json
             import threading
-            from RNS import Packet, Link, Identity, Destination
+            import tempfile
+            from RNS import Packet, Link, Identity, Destination, Resource
             
             dest_hash = bytes.fromhex(gateway_id)
             server_identity = Identity.recall(dest_hash)
@@ -494,47 +495,61 @@ class WalletBackend:
             # 🔥 ATTESA PACCHETTI JSON O RESOURCE
             response_data = None
             response_received = threading.Event()
-            is_resource = False
             
             def on_packet_received(message, packet):
-                nonlocal response_data, is_resource
+                nonlocal response_data
                 try:
-                    # Prova a decodificare come JSON
                     data = json.loads(message.decode())
-                    # Se è una risposta normale (non compressed), è un pacchetto
                     if data.get("type") == "ledger_relay_response":
                         response_data = data
                         response_received.set()
                     else:
-                        # Altro tipo di pacchetto
                         print(f"📥 Pacchetto ricevuto: {data.get('type', 'unknown')}")
                 except:
-                    print("📥 Pacchetto non JSON (probabilmente parte di resource)")
+                    print("📥 Pacchetto non JSON")
             
             link.set_packet_callback(on_packet_received)
             
-            # Invia richiesta
-            Packet(link, json.dumps(request).encode()).send()
-            print_blue(f"📤 Richiesta inviata a {gateway_id[:16]}...")
+            # 🔥 PREPARA LA RICHIESTA
+            request_json = json.dumps(request)
+            request_bytes = request_json.encode()
+            
+            # 🔥 SE LA RICHIESTA SUPERA L'MTU, USA RESOURCE
+            if len(request_bytes) > 450:
+                print(f"📤 Richiesta grande ({len(request_bytes)} bytes), invio via Resource...")
+                try:
+                    with tempfile.NamedTemporaryFile(mode='wb', suffix='.json', delete=False) as tmp:
+                        tmp.write(request_bytes)
+                        tmp_path = tmp.name
+                    
+                    file_obj = open(tmp_path, 'rb')
+                    resource = Resource(file_obj, link, is_response=False)
+                    resource.data_size = len(request_bytes)
+                    print(f"📤 Resource inviato ({len(request_bytes)} bytes)")
+                    time.sleep(0.5)  # Dai tempo per l'invio
+                except Exception as e:
+                    print(f"⚠️ Errore invio Resource: {e}")
+                    # Fallback: pacchetto normale
+                    Packet(link, request_bytes).send()
+                    print_blue(f"📤 Richiesta inviata a {gateway_id[:16]}... (pacchetto, {len(request_bytes)} bytes)")
+            else:
+                # 🔥 PACCHETTO PICCOLO
+                Packet(link, request_bytes).send()
+                print_blue(f"📤 Richiesta inviata a {gateway_id[:16]}... ({len(request_bytes)} bytes)")
             
             # 🔥 ASPETTA PACCHETTO O RESOURCE
             start_time = time.time()
             while time.time() - start_time < timeout:
-                # Se abbiamo ricevuto un pacchetto, esci
                 if response_received.is_set():
                     break
-                
-                # Se abbiamo ricevuto un resource, esci
                 if resource_received.is_set():
                     break
-                
                 time.sleep(0.1)
             
             # 🔥 SE ABBIAMO RICEVUTO UN RESOURCE
             if resource_received.is_set():
                 if resource_data and not resource_error:
                     try:
-                        # Il resource contiene la risposta JSON
                         return json.loads(resource_data.decode())
                     except Exception as e:
                         print_red(f"❌ Errore decodifica resource: {e}")
@@ -1654,7 +1669,7 @@ class WalletBackend:
 
             print_blue(f"📡 Invio tentativo {attempt+1} a {gateway.get('name', 'UNKNOWN')}")
 
-            response = self._send_reticulum_request(gateway['gateway_id'], request, timeout=60)
+            response = self._send_reticulum_request(gateway['gateway_id'], request, timeout=30)
 
             if response and response.get("success"):
                 result = response.get("result", {})

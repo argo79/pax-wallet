@@ -309,13 +309,13 @@ class GatewayServerHandler:
                 print("⚠️ Pacchetto vuoto ricevuto")
                 return
             
+            # 🔥 PRIMA PROVA A DECODIFICARE COME JSON
+            data = None
             try:
                 data = json.loads(message.decode())
-            except json.JSONDecodeError as e:
-                print(f"⚠️ JSON non valido: {e}")
-                return
-            except UnicodeDecodeError as e:
-                print(f"⚠️ Decodifica UTF-8 fallita: {e}")
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                # Potrebbe essere un Resource (dati binari)
+                print("📥 Pacchetto non JSON (probabilmente Resource), ignoro")
                 return
             
             if not isinstance(data, dict):
@@ -324,7 +324,7 @@ class GatewayServerHandler:
             
             print(f"📥 Pacchetto ricevuto: {data.get('type', 'unknown')}")
             
-            # 🔥 GESTISCI RICHIESTE INFO - USA RESOURCE
+            # 🔥 GESTISCI RICHIESTE INFO
             if data.get("type") == "info_request":
                 if not self.metrics:
                     print("⚠️ Metrics non disponibile, ignoro richiesta info")
@@ -367,6 +367,8 @@ class GatewayServerHandler:
                 operation = data.get("operation")
                 payload = data.get("payload", {})
                 
+                print(f"📥 Richiesta ledger_relay: {operation}")
+                
                 if operation == "get_balance":
                     result = self._handle_get_balance(payload)
                 elif operation == "get_history":
@@ -380,23 +382,34 @@ class GatewayServerHandler:
                 else:
                     result = {"error": f"Operazione non supportata: {operation}"}
                 
+                # 🔥 COSTRUISCI RISPOSTA
+                use_tor = self.metrics._use_tor if hasattr(self.metrics, '_use_tor') else False
+                tor_reachable = self.metrics._tor_reachable if hasattr(self.metrics, '_tor_reachable') else False
+                
                 if result.get("error"):
                     response_data = {
                         "type": "ledger_relay_response",
                         "success": False,
                         "error": result["error"],
-                        "timestamp": int(time.time())
+                        "timestamp": int(time.time()),
+                        "gateway_id": self._my_gateway_id,
+                        "tor_enabled": use_tor,
+                        "tor_reachable": tor_reachable
                     }
                 else:
                     response_data = {
                         "type": "ledger_relay_response",
                         "success": True,
                         "result": result,
-                        "timestamp": int(time.time())
+                        "timestamp": int(time.time()),
+                        "gateway_id": self._my_gateway_id,
+                        "tor_enabled": use_tor,
+                        "tor_reachable": tor_reachable
                     }
                 
                 response_bytes = json.dumps(response_data).encode()
                 
+                # 🔥 SE TROPPO GRANDE PER MTU 500, USA RESOURCE
                 if len(response_bytes) > 450:
                     print(f"📤 Risposta ledger grande ({len(response_bytes)} bytes), uso Resource...")
                     self._send_response_as_resource(packet.link, response_bytes)
@@ -916,18 +929,21 @@ class ReticulumManager:
             if not message:
                 return
             
+            # 🔥 VERIFICA SE È UN PACCHETTO VIA LINK
+            if hasattr(packet, 'link') and packet.link is not None:
+                # I pacchetti via link sono gestiti da GatewayServerHandler
+                # Ma se arrivano qui, potrebbero essere Resource
+                print("📥 Pacchetto via link (dovrebbe essere gestito da GatewayServerHandler)")
+                # Non fare nulla, GatewayServerHandler se ne occupa
+                return
+            
+            # 🔥 PACCHETTI SENZA LINK (annunci, broadcast)
             try:
                 data = json.loads(message.decode())
+                if isinstance(data, dict):
+                    print(f"📥 Pacchetto senza link: {data.get('type', 'unknown')}")
             except:
-                return
-            
-            if not isinstance(data, dict):
-                return
-            
-            print(f"📥 Pacchetto ricevuto (senza link): {data.get('type', 'unknown')}")
-            
-            # 🔥 I pacchetti via link sono già gestiti da GatewayServerHandler
-            # Qui arrivano solo annunci e broadcast
+                print("📥 Pacchetto senza link (non JSON)")
             
         except Exception as e:
             print(f"⚠️ Errore: {e}")
