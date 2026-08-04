@@ -648,7 +648,7 @@ class GatewayServerHandler:
                         horizon = "https://horizon-testnet.stellar.org"
                     
                     url = f"{horizon}/accounts/{address}/transactions?limit={limit}&order=desc"
-                    response = requests.get(url, timeout=30)
+                    response = requests.get(url, timeout=60)
                     
                     if response.status_code != 200:
                         return {"error": f"Horizon error: {response.status_code}"}

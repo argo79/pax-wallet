@@ -425,7 +425,7 @@ class WalletBackend:
         print_red("❌ Nessun gateway disponibile con Internet")
         return None
 
-    def _send_reticulum_request(self, gateway_id: str, request: Dict, timeout: int = 30) -> Optional[Dict]:
+    def _send_reticulum_request(self, gateway_id: str, request: Dict, timeout: int = 60) -> Optional[Dict]:
         """Invia una richiesta RPC a un gateway e attende risposta (supporta Resource)"""
         if not self.reticulum:
             print_red("❌ Reticulum non disponibile")
@@ -1669,7 +1669,7 @@ class WalletBackend:
 
             print_blue(f"📡 Invio tentativo {attempt+1} a {gateway.get('name', 'UNKNOWN')}")
 
-            response = self._send_reticulum_request(gateway['gateway_id'], request, timeout=30)
+            response = self._send_reticulum_request(gateway['gateway_id'], request, timeout=60)
 
             if response and response.get("success"):
                 result = response.get("result", {})
@@ -1725,7 +1725,7 @@ class WalletBackend:
             "client_gateway_id": self.reticulum.gateway_address
         }
         
-        response = self._send_reticulum_request(gateway['gateway_id'], request, timeout=30)
+        response = self._send_reticulum_request(gateway['gateway_id'], request, timeout=60)
         
         if response and response.get("success"):
             result = response.get("result", {})
@@ -1751,7 +1751,7 @@ class WalletBackend:
             "client_gateway_id": self.reticulum.gateway_address
         }
         
-        response = self._send_reticulum_request(gateway['gateway_id'], request, timeout=30)
+        response = self._send_reticulum_request(gateway['gateway_id'], request, timeout=60)
         
         if response and response.get("success"):
             result = response.get("result", {})
