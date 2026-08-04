@@ -334,7 +334,7 @@ class GatewayMetrics:
     # ============================================================
     
     def process_info_request(self, request_data: dict, link=None) -> Optional[str]:
-        """Processa una richiesta info e invia risposta SEMPRE via Resource"""
+        """Processa una richiesta info - USA RESOURCE per MTU 500"""
         try:
             client_hops = request_data.get("hops", None)
             client_rtt = request_data.get("rtt_ms", None)
@@ -388,33 +388,35 @@ class GatewayMetrics:
             response_json = json.dumps(response_dict)
             response_bytes = response_json.encode()
             
-            # 🔥 USA SEMPRE RESOURCE PER ESSERE SICURI (gestisce MTU automaticamente)
+            # 🔥 SE LINK DISPONIBILE, USA RESOURCE
             if link is not None:
-                print(f"📤 Invio risposta via Resource ({len(response_bytes)} bytes)")
                 try:
                     from RNS import Resource
+                    print(f"📤 Invio risposta via Resource ({len(response_bytes)} bytes)")
+                    # 🔥 RESOURCE GESTISCE AUTOMATICAMENTE LO CHUNKING PER MTU
                     resource = Resource(link, response_bytes, is_response=True)
-                    resource.set_timeout(30)
-                    # Aspetta il completamento
+                    # Aspetta completamento per radio (timeout più lungo)
                     start = time.time()
-                    while not resource.is_complete() and (time.time() - start) < 30:
+                    while not resource.is_complete() and (time.time() - start) < 60:
                         time.sleep(0.1)
                     if resource.is_complete():
                         print(f"✅ Resource inviato completato")
                     else:
                         print(f"⚠️ Resource non completato in tempo")
-                    return None  # Già inviato
+                    return None
                 except Exception as e:
                     print(f"⚠️ Errore invio Resource: {e}")
-                    # Fallback: prova pacchetto
-                    print(f"📤 Fallback a pacchetto ({len(response_bytes)} bytes)")
-                    return response_json
+                    # Fallback: solo se pacchetto piccolo
+                    if len(response_bytes) < 450:
+                        print(f"📤 Fallback pacchetto ({len(response_bytes)} bytes)")
+                        return response_json
+                    print(f"❌ Response troppo grande per pacchetto")
+                    return None
             
-            # Se link è None, ritorna JSON per essere inviato come pacchetto
             return response_json
             
         except Exception as e:
-            print(f"⚠️ Errore processing info_request: {e}")
+            print(f"⚠️ Errore processing_info_request: {e}")
             return None
     
     # ============================================================

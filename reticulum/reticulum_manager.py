@@ -304,84 +304,87 @@ class GatewayServerHandler:
             return self._link_hops.get(link_id)
     
     def _handle_packet(self, message, packet):
-        print(f"📥 Pacchetto ricevuto")
-        data = None
         try:
-            data = json.loads(message.decode())
-            
-            # GESTISCI RICHIESTE LEDGER RELAY
-            if data.get("type") == "ledger_relay":
-                print(f"📥 Richiesta ledger_relay: {data.get('operation')}")
-                response = self._process_ledger_relay(data)
-                if response:
-                    # 🔥 OTTIENI LO STATO TOR DA METRICS
-                    use_tor = self.metrics._use_tor if hasattr(self.metrics, '_use_tor') else False
-                    tor_reachable = self.metrics._tor_reachable if hasattr(self.metrics, '_tor_reachable') else False
-                    
-                    response_data = {
-                        "type": "ledger_relay_response",
-                        "version": "1.0",
-                        "operation": data.get("operation"),
-                        "success": response.get("success", False),
-                        "result": response.get("result", {}),
-                        "error": response.get("error"),
-                        "timestamp": int(time.time()),
-                        "gateway_id": self._my_gateway_id,
-                        "tor_enabled": use_tor,
-                        "tor_reachable": tor_reachable
-                    }
-                    
-                    response_bytes = json.dumps(response_data).encode()
-                    
-                    # SE I DATI SONO PICCOLI, USA PACCHETTO
-                    if len(response_bytes) <= RNS.Link.MDU:
-                        Packet(packet.link, response_bytes).send()
-                        print(f"📤 Risposta ledger_relay inviata ({len(response_bytes)} bytes)")
-                    else:
-                        # DATI GRANDI: USA RESOURCE
-                        print(f"📤 Risposta ledger_relay grande ({len(response_bytes)} bytes), uso Resource...")
-                        self._send_response_as_resource(packet.link, response_bytes)
+            if not message:
+                print("⚠️ Pacchetto vuoto ricevuto")
                 return
             
-            # GESTISCI RICHIESTE INFO
+            try:
+                data = json.loads(message.decode())
+            except json.JSONDecodeError as e:
+                print(f"⚠️ JSON non valido: {e}")
+                return
+            except UnicodeDecodeError as e:
+                print(f"⚠️ Decodifica UTF-8 fallita: {e}")
+                return
+            
+            if not isinstance(data, dict):
+                print(f"⚠️ Pacchetto non è un dict: {type(data)}")
+                return
+            
+            print(f"📥 Pacchetto ricevuto: {data.get('type', 'unknown')}")
+            
+            if data.get("type") == "ledger_relay":
+                if not self.metrics:
+                    print("⚠️ Metrics non disponibile, ignoro richiesta ledger_relay")
+                    return
+                
+                if ReticulumManager._server_handler:
+                    ReticulumManager._server_handler._handle_packet(message, packet)
+                else:
+                    print("⚠️ Server handler non disponibile")
+                return
+            
+            # 🔥 GESTISCI RICHIESTE INFO - CORRETTO!
             if data.get("type") == "info_request":
-                if self.metrics:
-                    response = self.metrics.process_info_request(data)
+                if not self.metrics:
+                    print("⚠️ Metrics non disponibile, ignoro richiesta info")
+                    return
+                
+                try:
+                    # 🔥 PASSA IL LINK PER USARE RESOURCE
+                    response = self.metrics.process_info_request(data, link=packet.link)
+                    
                     if response:
-                        Packet(packet.link, response.encode()).send()
-                        print("📤 Risposta info inviata")
-                        if packet and hasattr(packet, 'link') and packet.link:
-                            try:
-                                time.sleep(0.1)
+                        response_bytes = response.encode()
+                        
+                        # 🔥 SE TROPPO GRANDE PER MTU 500, USA RESOURCE
+                        if len(response_bytes) > 450:
+                            print(f"📤 Risposta grande ({len(response_bytes)} bytes), uso Resource...")
+                            if ReticulumManager._server_handler:
+                                ReticulumManager._server_handler._send_response_as_resource(packet.link, response_bytes)
+                        else:
+                            Packet(packet.link, response_bytes).send()
+                            print(f"📤 Risposta info inviata ({len(response_bytes)} bytes)")
+                        
+                        # Chiudi link dopo risposta
+                        try:
+                            time.sleep(0.1)
+                            if packet.link and packet.link.is_established():
                                 packet.link.teardown()
-                                print("🔗 Link chiuso dopo risposta inviata")
-                            except Exception as e:
-                                print(f"⚠️ Errore chiusura link: {e}")
+                                print("🔗 Link chiuso dopo risposta")
+                        except:
+                            pass
+                    else:
+                        print("📤 Risposta inviata via Resource")
+                except Exception as e:
+                    print(f"⚠️ Errore generazione risposta info: {e}")
+                    import traceback
+                    traceback.print_exc()
                 return
             
             print(f"📥 Tipo pacchetto sconosciuto: {data.get('type')}")
-            
-        except json.JSONDecodeError:
-            print("⚠️ Pacchetto non JSON valido")
-        except UnicodeDecodeError:
-            print("⚠️ Pacchetto non decodificabile come UTF-8")
+                
         except Exception as e:
-            print(f"⚠️ Errore elaborazione pacchetto: {e}")
+            print(f"⚠️ Errore critico elaborazione pacchetto: {e}")
+            import traceback
+            traceback.print_exc()
         finally:
-            # NON CHIUDERE IL LINK PER LEDGER_RELAY
             if packet and hasattr(packet, 'link') and packet.link:
                 try:
                     if packet.link.is_established():
-                        is_ledger_relay = False
-                        try:
-                            if data and data.get("type") == "ledger_relay":
-                                is_ledger_relay = True
-                        except:
-                            pass
-                        
-                        if not is_ledger_relay:
-                            packet.link.teardown()
-                            print("🔗 Link chiuso (cleanup finale)")
+                        packet.link.teardown()
+                        print("🔗 Link chiuso (cleanup finale)")
                 except:
                     pass
     
