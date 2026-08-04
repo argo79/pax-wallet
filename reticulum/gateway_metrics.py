@@ -454,7 +454,7 @@ class GatewayMetrics:
     # CLIENT - INVIO RICHIESTA
     # ============================================================
     
-    def request_gateway_info(self, gateway_id: str, timeout_seconds: int = 15) -> bool:
+    def request_gateway_info(self, gateway_id: str, timeout_seconds: int = 30) -> bool:
         if gateway_id == self._my_gateway_id:
             print(f"⚠️ Tentativo di connettersi a se stesso, ignorato")
             return False
@@ -497,6 +497,9 @@ class GatewayMetrics:
             
             link = Link(server_destination)
             
+            # 🔥 IMPOSTA LA STRATEGIA PER ACCETTARE RESOURCE
+            link.set_resource_strategy(RNS.Link.ACCEPT_ALL)
+            
             link_established = threading.Event()
             rtt_ms = None
             link_hops = None
@@ -522,59 +525,123 @@ class GatewayMetrics:
                 link.teardown()
                 return False
             
+            # 🔥 VARIABILI PER LA RISPOSTA (RESOURCE O PACCHETTO)
             response_data = None
+            resource_data = None
+            resource_received = threading.Event()
             response_received = threading.Event()
             request_time = time.time()
+            resource_error = None
             
+            # 🔥 CALLBACK PER RESOURCE
+            def on_resource_started(resource):
+                print(f"📥 Ricezione resource iniziata ({resource.total_size} bytes)")
+            
+            def on_resource_concluded(resource):
+                nonlocal resource_data, resource_error
+                if resource.status == RNS.Resource.COMPLETE:
+                    try:
+                        resource_data = resource.data.read()
+                        print(f"✅ Resource ricevuto ({len(resource_data)} bytes)")
+                    except Exception as e:
+                        resource_error = str(e)
+                        print(f"❌ Errore lettura resource: {e}")
+                else:
+                    resource_error = f"Resource fallito: {resource.status}"
+                    print(f"❌ {resource_error}")
+                resource_received.set()
+            
+            link.set_resource_started_callback(on_resource_started)
+            link.set_resource_concluded_callback(on_resource_concluded)
+            
+            # 🔥 CALLBACK PER PACCHETTI (piccoli)
             def on_packet_received(message, packet):
                 nonlocal response_data
-                response_data = message.decode()
-                response_received.set()
+                try:
+                    response_data = message.decode()
+                    response_received.set()
+                except Exception as e:
+                    print(f"⚠️ Errore decodifica pacchetto: {e}")
             
             link.set_packet_callback(on_packet_received)
             
             final_hops = link_hops if link_hops is not None else hops
             
+            # 🔥 RICHIESTA MINIMALE (solo essenziale)
             request = {
                 "type": "info_request",
                 "from": self._my_gateway_id,
-                "timestamp": int(time.time()),
-                "hops": final_hops,
-                "rtt_ms": rtt_ms
+                "timestamp": int(time.time())
             }
-            RNS.Packet(link, json.dumps(request).encode()).send()
+            if final_hops is not None:
+                request["hops"] = final_hops
+            if rtt_ms is not None:
+                request["rtt_ms"] = rtt_ms
             
-            if response_received.wait(timeout_seconds):
-                if response_data:
-                    response_time = time.time()
-                    rtt_from_response = round((response_time - request_time) * 1000, 2)
-                    print(f"📊 Reticulum RTT: {rtt_from_response}ms (da request/response)")
-                    
+            # 🔥 INVIA RICHIESTA COME PACCHETTO (piccolo, < 500 byte)
+            request_json = json.dumps(request)
+            print(f"📤 Richiesta info inviata a {gateway_id[:16]}... ({len(request_json)} bytes)")
+            RNS.Packet(link, request_json.encode()).send()
+            
+            # 🔥 ASPETTA RISPOSTA (pacchetto o resource)
+            start_time = time.time()
+            while time.time() - start_time < timeout_seconds:
+                if resource_received.is_set():
+                    break
+                if response_received.is_set():
+                    break
+                time.sleep(0.1)
+            
+            # 🔥 SE ABBIAMO RICEVUTO UN RESOURCE
+            if resource_received.is_set():
+                if resource_data and not resource_error:
                     try:
-                        cleaned_data = re.sub(r'#.*$', '', response_data, flags=re.MULTILINE)
-                        response_json = json.loads(cleaned_data.strip())
-                        response_json['latency_ms'] = rtt_ms if rtt_ms is not None else rtt_from_response
-                        if final_hops is not None:
-                            response_json['hops'] = final_hops
-                        response_data = json.dumps(response_json)
+                        response_data = resource_data.decode()
+                        print(f"📥 Risposta da resource ({len(response_data)} bytes)")
                     except Exception as e:
-                        print(f"⚠️ Errore aggiunta hops/latency: {e}")
-                    
-                    success = self.process_info_response(response_data)
-                    
-                    try:
+                        print(f"❌ Errore decodifica resource: {e}")
                         link.teardown()
-                    except:
-                        pass
-                    
-                    return success
+                        return False
+                else:
+                    print(f"❌ Errore resource: {resource_error}")
+                    link.teardown()
+                    return False
             
+            # 🔥 SE ABBIAMO RICEVUTO UN PACCHETTO
+            if response_received.is_set() and response_data:
+                response_time = time.time()
+                rtt_from_response = round((response_time - request_time) * 1000, 2)
+                print(f"📊 Reticulum RTT: {rtt_from_response}ms (da request/response)")
+                
+                try:
+                    cleaned_data = re.sub(r'#.*$', '', response_data, flags=re.MULTILINE)
+                    response_json = json.loads(cleaned_data.strip())
+                    if rtt_ms is not None:
+                        response_json['latency_ms'] = rtt_ms
+                    elif rtt_from_response is not None:
+                        response_json['latency_ms'] = rtt_from_response
+                    if final_hops is not None:
+                        response_json['hops'] = final_hops
+                    response_data = json.dumps(response_json)
+                except Exception as e:
+                    print(f"⚠️ Errore aggiunta hops/latency: {e}")
+            
+            # 🔥 PROCESS LA RISPOSTA
+            if response_data:
+                success = self.process_info_response(response_data)
+                try:
+                    link.teardown()
+                except:
+                    pass
+                return success
+            
+            print(f"⏰ Timeout attesa risposta ({timeout_seconds}s)")
             try:
                 link.teardown()
             except:
                 pass
             return False
-                    
+                        
         except Exception as e:
             print(f"⚠️ Errore: {e}")
             return False

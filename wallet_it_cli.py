@@ -515,32 +515,26 @@ class PaxWalletCLI:
             print_red(f"❌ {result.get('message', 'Errore')}")
     
     def _cmd_info(self):
-        """Info wallet"""
+        """Info wallet - SOLO DATI PUBBLICI"""
         result = self.backend.get_wallet_info()
         if result.get("success"):
-            print_bold("\n📊 INFO COMPLETA WALLET")
+            print_bold("\n📊 INFO WALLET")
             print("=" * 60)
-            print(f"   Crypto: {result.get('crypto', 'N/A')}")
-            print(f"   Network: {result.get('network', 'N/A').upper()}")
-            print(f"   Address: {result.get('address', 'N/A')}")
-            print(f"   Seed Type: {result.get('seed_type', 'N/A')}")
+            print(f"   Nome:       {self.backend._get_active_wallet_name() or 'N/A'}")
+            print(f"   Crypto:     {result.get('crypto', 'N/A')}")
+            print(f"   Network:    {result.get('network', 'N/A').upper()}")
+            print(f"   Address:    {result.get('address', 'N/A')}")
+            print(f"   Seed Type:  {result.get('seed_type', 'N/A')}")
             if result.get('balance') is not None:
-                print(f"   Balance: {result.get('balance', 0):.6f} {result.get('crypto', 'XRP')}")
-            if result.get('mnemonic'):
-                print(f"\n   Mnemonic: {result.get('mnemonic')}")
-                print(f"   Word Count: {len(result.get('mnemonic', '').split())}")
-            if result.get('secret_numbers'):
-                print(f"\n   Secret Numbers: {result.get('secret_numbers')}")
-            if result.get('xrp_seed'):
-                print(f"\n   XRP Seed: {result.get('xrp_seed')}")
-            if result.get('stellar_seed'):
-                print(f"\n   Stellar Seed: {result.get('stellar_seed')}")
-            if result.get('private_key'):
-                print(f"\n   Private Key: {result.get('private_key')}")
+                print(f"   Balance:    {result.get('balance', 0):.6f} {result.get('crypto', 'XRP')}")
+            
+            # 🔥 MOSTRA SOLO DATI PUBBLICI - NIENTE CHIAVI!
+            # Solo info sui wallet derivati (pubblici)
             if result.get('derived_wallets'):
-                print(f"\n   Derived Wallets: {len(result.get('derived_wallets', []))}")
+                print(f"\n   📂 Wallet derivati: {len(result.get('derived_wallets', []))}")
                 for w in result.get('derived_wallets', [])[:5]:
                     print(f"      - {w.get('address', 'N/A')} ({w.get('keyword', 'default')}:{w.get('index', 0)})")
+            
             print("=" * 60)
         else:
             print_red(f"❌ {result.get('message', 'Errore')}")
@@ -894,14 +888,18 @@ class PaxWalletCLI:
     
     def _menu_reticulum(self):
         while True:
+            # 🔥 OTTIENI TUTTO DAL BACKEND
+            gateway_result = self.backend.get_gateway_status()
+            gateway_status = gateway_result.get("status", {}) if gateway_result.get("success") else {}
+            
             status = self.backend.get_status()
             internet_status = "🌐 ON" if self.backend.use_internet else "📡 OFF (Reticulum)"
             
-            # 🔥 STATO TOR SEMPRE VISIBILE
+            # 🔥 TOR STATUS
             tor_status = "🧅 ON" if self.backend.use_tor else "🧅 OFF"
             tor_reachable = "✅" if self.backend._test_tor() else "❌"
             
-            # IP solo se internet è ON
+            # IP
             if self.backend.use_internet:
                 ip_info = self.backend.get_ip_status()
                 ip = ip_info.get("ip", "N/A")
@@ -912,29 +910,30 @@ class PaxWalletCLI:
             print("\n" + "=" * 50)
             print("  📡 RETICULUM")
             print("=" * 50)
-            print(f"  Gateway: {'✅ Attivo' if status.get('gateway_active') else '❌ Fermo'}")
-            print(f"  Peer conosciuti: {status.get('wallet_count', 0)}")
-            print(f"  Modalità internet: {internet_status}")
-            print(f"  TOR: {tor_status} {tor_reachable}")
-            print(f"  IP Pubblico: {ip_display}")
+            print(f"  Gateway Name:   {gateway_status.get('name', 'UNKNOWN')}")
+            print(f"  Gateway:        {'✅ Active' if status.get('gateway_active') else '❌ Stopped'}")
+            print(f"  Known peers:    {status.get('wallet_count', 0)}")
+            print(f"  Internet mode:  {internet_status}")
+            print(f"  TOR:            {tor_status} {tor_reachable}")
+            print(f"  Public IP:      {ip_display}")
 
             print("\n" + "-" * 50)
-            print("  1) Stato gateway")
-            print("  2) Avvia gateway")
-            print("  3) Ferma gateway")
-            print("  4) Scopri gateway")
-            print("  5) Scopri wallet")
-            print("  6) Peer metriche")
-            print("  7) Miglior gateway")
-            print("  8) Richiedi info gateway")
-            print("  9) Testa tutti i gateway")
-            print(" 10) 🌐 Toggle internet (usa Reticulum)")
-            print(" 11) 🧅 Toggle TOR (usa rete anonima)")
-            print(" 12) 🗑️ Rimuovi gateway manualmente")
-            print("  0) Torna al menu principale")
+            print("  1) Gateway status")
+            print("  2) Start gateway")
+            print("  3) Stop gateway")
+            print("  4) Discover gateways")
+            print("  5) Discover wallets")
+            print("  6) Peer metrics")
+            print("  7) Best gateway")
+            print("  8) Request gateway info")
+            print("  9) Test all gateways")
+            print(" 10) 🌐 Toggle internet (use Reticulum)")
+            print(" 11) 🧅 Toggle TOR (use anonymous network)")
+            print(" 12) 🗑️ Remove gateway manually")
+            print("  0) Return to main menu")
             print("-" * 50)
             
-            sub = input("\nScelta: ").strip()
+            sub = input("\nChoice: ").strip()
             
             if sub == '0':
                 break
@@ -963,30 +962,30 @@ class PaxWalletCLI:
             elif sub == '12':
                 self._cmd_remove_gateway()
             else:
-                print_red("❌ Scelta non valida")
+                print_red("❌ Invalid choice")
     
     def _cmd_gateway_status(self):
-        """Stato gateway con IP e stato TOR"""
+        """Gateway status with IP and TOR status"""
         result = self.backend.get_gateway_status()
         if result.get("success"):
             status = result.get("status", {})
             
-            # 🔥 TEST TOR IN TEMPO REALE
+            # 🔥 REAL-TIME TOR TEST
             tor_reachable = "✅" if self.backend._test_tor() else "❌"
             
-            print_bold("\n📊 STATO GATEWAY")
+            print_bold("\n📊 GATEWAY STATUS")
             print("=" * 60)
-            print(f"   Running: {status.get('running', False)}")
-            print(f"   Gateway: {status.get('is_gateway', False)}")
-            print(f"   PID: {status.get('pid', 'N/A')}")
+            print(f"   Name:           {status.get('name', 'UNKNOWN')}")
+            print(f"   Running:        {status.get('running', False)}")
+            print(f"   Gateway:        {status.get('is_gateway', False)}")
+            print(f"   PID:            {status.get('pid', 'N/A')}")
             if status.get('started_at'):
-                print(f"   Started: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(status['started_at']))}")
+                print(f"   Started:        {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(status['started_at']))}")
             print(f"   Gateway Address: {status.get('gateway_address', 'N/A')}")
-            print(f"   Wallet Address: {status.get('wallet_address', 'N/A')}")
-            print(f"   Gateway Count: {status.get('gateway_count', 0)}")
-            print(f"   Wallet Count: {status.get('wallet_count', 0)}")
+            print(f"   Wallet Address:  {status.get('wallet_address', 'N/A')}")
+            print(f"   Gateway Count:   {status.get('gateway_count', 0)}")
+            print(f"   Wallet Count:    {status.get('wallet_count', 0)}")
             
-            # 🔥 MOSTRA IP E STATO TOR
             public_ip = status.get('public_ip', 'N/A')
             use_tor = status.get('use_tor', False)
             internet_on = status.get('internet_on', True)
@@ -994,12 +993,12 @@ class PaxWalletCLI:
             tor_status = "🧅 TOR ON" if use_tor else "🌐 Direct"
             internet_status = "🌐 ON" if internet_on else "📡 OFF (Reticulum)"
             
-            print(f"   TOR: {tor_status} {tor_reachable}")   # <-- AGGIUNTO
-            print(f"   IP Pubblico: {public_ip} ({tor_status})")
-            print(f"   Internet: {internet_status}")
+            print(f"   TOR:            {tor_status} {tor_reachable}")
+            print(f"   IP Pubblico:    {public_ip} ({tor_status})")
+            print(f"   Internet:       {internet_status}")
             print("=" * 60)
         else:
-            print_red(f"❌ {result.get('message', 'Errore')}")
+            print_red(f"❌ {result.get('message', 'Error')}")
     
     def _cmd_gateway_start(self):
         """Avvia gateway"""
@@ -1080,29 +1079,31 @@ class PaxWalletCLI:
         print("=" * 100)
     
     def _cmd_peer_metrics(self):
-        """Peer metriche - USA SCORE DAL BACKEND"""
+        """Peer metriche"""
         result = self.backend.get_peer_metrics()
         
         if not result.get("success"):
-            print_red(f"❌ {result.get('message', 'Errore')}")
+            print_red(f"❌ {result.get('message', 'Error')}")
             return
         
         peers = result.get("peers", [])
         if not peers:
-            print_yellow("⚠️ Nessun peer conosciuto")
+            print_yellow(f"⚠️ {result.get('message', 'Nessun peer disponibile')}")
             return
+        
+        # 🔥 MOSTRA FILTRO APPLICATO
+        if self.backend.use_tor:
+            print_blue("🧅 TOR ON: gateway filtrati per TOR + Internet")
+        else:
+            print_green("🌐 TOR OFF: gateway filtrati per Internet")
         
         print_bold(f"\n🔍 PEER ORDINATI PER PERFORMANCE ({len(peers)})")
         print("=" * 280)
-        # 🔥 AGGIUNGI COLONNA TOR
-        print(f"{'#':<3} {'Nome':<22} {'Score':<6} {'Rel':<6} {'Rep':<4} {'Hops':<5} {'RTT':<8} {'XRP':<14} {'Stellar':<14} {'Internet':<9} {'TOR':<6} {'Ultimo visto':<15} {'ID':<36} {'Assets'}")
+        print(f"{'#':<3} {'Nome':<22} {'Hops':<5} {'RTT':<8} {'XRP':<14} {'Stellar':<14} {'Internet':<9} {'TOR':<6} {'Ultimo visto':<15} {'ID':<36} {'Assets'}")
         print("-" * 280)
         
         for idx, p in enumerate(peers, 1):
-            sc = round(p.get('_score', 0))
             name = str(p.get('name', 'UNKNOWN'))[:16]
-            rel = round(p.get('reliability', 0), 2)
-            rep = p.get('reputation', 50)
             hops = str(p.get('hops', '?'))
             rtt = f"{p.get('latency_ms', '?')}ms"
             
@@ -1124,7 +1125,7 @@ class PaxWalletCLI:
             last_seen = format_time_ago(p.get('last_seen'))
             gw_id = p.get('gateway_id', 'N/A')[:36]
             
-            # 🔥 STATO TOR
+            # TOR
             tor_enabled = p.get('tor_enabled', False)
             tor_reachable = p.get('tor_reachable', False)
             if tor_enabled and tor_reachable:
@@ -1142,11 +1143,7 @@ class PaxWalletCLI:
             else:
                 assets_str = str(assets)[:20]
             
-            # Colori
-            sc_color = Colors.GREEN if sc > 70 else Colors.YELLOW if sc > 40 else Colors.RED
-            rel_color = Colors.GREEN if rel > 0.9 else Colors.YELLOW if rel > 0.7 else Colors.RED
-            
-            print(f"{idx:<3} {name:<20} {sc_color}{sc:5.0f}{Colors.RESET} {rel_color}{rel:5.2f}{Colors.RESET} {rep:<4} {hops:<5} {rtt:<8} {xrp_str:<14} {stellar_str:<14} {internet:<9} {tor_str:<6} {last_seen:<15} {gw_id:<36} {assets_str}")
+            print(f"{idx:<3} {name:<20} {hops:<5} {rtt:<8} {xrp_str:<14} {stellar_str:<14} {internet:<9} {tor_str:<6} {last_seen:<15} {gw_id:<36} {assets_str}")
         
         print("=" * 280)
         
@@ -1154,29 +1151,22 @@ class PaxWalletCLI:
         if stats:
             print(f"\n📊 Statistiche:")
             print(f"   Totale peer: {stats.get('total_peers', 0)}")
-            print(f"   Online: {stats.get('online_peers', 0)}")
-            print(f"   Offline: {stats.get('offline_peers', 0)}")
-            print(f"   Reputazione media: {round(stats.get('avg_reputation', 0), 1)}")
+            if stats.get('tor_peers', 0) > 0:
+                print(f"   Gateway con TOR: {stats.get('tor_peers')}")
+            if stats.get('xrp_peers', 0) > 0:
+                print(f"   Gateway con XRP: {stats.get('xrp_peers')}")
+            if stats.get('stellar_peers', 0) > 0:
+                print(f"   Gateway con Stellar: {stats.get('stellar_peers')}")
             if stats.get('avg_latency_ms'):
-                print(f"   Latenza media Reticulum: {round(stats.get('avg_latency_ms'), 0)}ms")
-            if stats.get('avg_score'):
-                print(f"   Score medio: {round(stats.get('avg_score'))}")
-            # 🔥 AGGIUNGI STATISTICA TOR
-            tor_peers = stats.get('tor_peers', 0)
-            if tor_peers > 0:
-                print(f"   Gateway con TOR: {tor_peers}")
+                print(f"   Latenza media: {round(stats.get('avg_latency_ms'), 0)}ms")
         
         if peers:
             b = peers[0]
-            best_score = b.get('_score', 0)
             print(f"\n🏆 MIGLIOR PEER: {b.get('name', 'UNKNOWN')}")
-            print(f"   Score: {best_score:.0f} | Rel: {b.get('reliability', 0):.2f} | Rep: {b.get('reputation', 50)}")
-            print(f"   Gateway ID: {b.get('gateway_id', 'N/A')}")
-            print(f"   RTT Reticulum: {b.get('latency_ms', '?')}ms | Hops: {b.get('hops', '?')}")
+            print(f"   Hops: {b.get('hops', '?')} | RTT: {b.get('latency_ms', '?')}ms")
             print(f"   XRP: {'✅' if b.get('xrp_reachable') else '❌'} ({b.get('xrp_latency_ms', '?')}ms)")
             print(f"   Stellar: {'✅' if b.get('stellar_reachable') else '❌'} ({b.get('stellar_latency_ms', '?')}ms)")
             print(f"   Internet: {'✅' if b.get('has_internet') else '❌'}")
-            # 🔥 AGGIUNGI TOR AL MIGLIOR PEER
             tor_enabled = b.get('tor_enabled', False)
             tor_reachable = b.get('tor_reachable', False)
             if tor_enabled and tor_reachable:

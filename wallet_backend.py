@@ -378,34 +378,52 @@ class WalletBackend:
     # RETICULUM - RPC PER OPERAZIONI LEDGER
     # ============================================================
 
-    def _select_best_gateway(self) -> Optional[Dict]:
-        """Seleziona il miglior gateway.
-           Se TOR è attivo, usa SOLO gateway con TOR.
+    def _select_best_gateway(self, asset: str = None) -> Optional[Dict]:
+        """
+        Seleziona il miglior gateway usando GatewayMetrics.
+        asset: se specificato, cerca gateway che supporta quell'asset
         """
         if not self.metrics:
+            print_red("❌ Metrics non disponibili")
             return None
         
-        peers = self.metrics.get_all_peers()
+        # 🔥 USA GatewayMetrics.get_best_gateway() che già filtra per has_internet=1
+        best = self.metrics.get_best_gateway(asset)
         
-        # 🔥 FILTRA IN BASE A TOR
-        if self.use_tor:
-            candidates = [p for p in peers if p.get('is_online') and p.get('tor_enabled') and p.get('tor_reachable')]
-            if not candidates:
-                print_red("🧅 TOR ON: NESSUN gateway con TOR disponibile!")
-                print_yellow("   La transazione non può essere inviata in modo anonimo.")
-                return None
-            print_blue(f"🧅 TOR ON: usando {len(candidates)} gateway con TOR")
-        else:
-            # TOR OFF: comportamento normale
-            candidates = [p for p in peers if p.get('is_online') and p.get('has_internet')]
-            if not candidates:
-                candidates = [p for p in peers if p.get('is_online')]
+        if best:
+            # 🔥 SE TOR ON: verifica che il gateway abbia TOR
+            if self.use_tor:
+                if not (best.get('tor_enabled') and best.get('tor_reachable')):
+                    # Il miglior gateway non ha TOR, cerco uno con TOR
+                    peers = self.metrics.get_all_peers()
+                    tor_candidates = [
+                        p for p in peers 
+                        if p.get('is_online') 
+                        and p.get('has_internet') 
+                        and p.get('tor_enabled') 
+                        and p.get('tor_reachable')
+                    ]
+                    if not tor_candidates:
+                        print_red("🧅 TOR ON: NESSUN gateway con TOR + Internet disponibile!")
+                        return None
+                    # Ordina come get_best_gateway
+                    tor_candidates.sort(key=lambda p: (
+                        p.get('hops', 999),
+                        p.get('latency_ms', 99999),
+                        -p.get('reputation', 0),
+                        -p.get('reliability', 0)
+                    ))
+                    best = tor_candidates[0]
+                    print_blue(f"🧅 TOR ON: usando gateway con TOR: {best.get('name', 'UNKNOWN')}")
+                else:
+                    print_blue(f"🧅 TOR ON: gateway con TOR: {best.get('name', 'UNKNOWN')}")
+            else:
+                print_green(f"🌐 Gateway scelto: {best.get('name', 'UNKNOWN')}")
+            
+            return best
         
-        if not candidates:
-            return None
-        
-        candidates.sort(key=lambda p: p.get('_score', 0), reverse=True)
-        return candidates[0]
+        print_red("❌ Nessun gateway disponibile con Internet")
+        return None
 
     def _send_reticulum_request(self, gateway_id: str, request: Dict, timeout: int = 30) -> Optional[Dict]:
         """Invia una richiesta RPC a un gateway e attende risposta (supporta Resource)"""
@@ -1857,18 +1875,35 @@ class WalletBackend:
         }
 
     def get_gateway_status(self) -> Dict[str, Any]:
+        """Ottiene lo stato del gateway con nome dal config"""
         if not self.reticulum:
             return {"success": False, "message": "Reticulum not available"}
+        
         status = self.reticulum.get_status()
+        
+        # 🔥 LEGGI IL NOME DAL CONFIG
+        gateway_name = "UNKNOWN"
+        try:
+            config_path = Path("annuncio_config.json")
+            if config_path.exists():
+                with open(config_path, 'r') as f:
+                    config = json.load(f)
+                    gateway_name = config.get("gateway", {}).get("name", "UNKNOWN")
+        except:
+            pass
+        
         # 🔥 IP VISIBILE SOLO SE INTERNET È ON
         if self.use_internet:
             status["public_ip"] = self._get_public_ip()
         else:
             status["public_ip"] = "N/A (Reticulum)"
+        
         status["use_tor"] = self.use_tor
         status["internet_on"] = self.use_internet
+        status["name"] = gateway_name
+        
         return {"success": True, "status": status, "message": "OK"}
-    
+
     def start_gateway(self) -> Dict[str, Any]:
         if not self.reticulum:
             return {"success": False, "message": "Reticulum not available"}
@@ -1936,85 +1971,61 @@ class WalletBackend:
         if not self.metrics:
             return {"success": False, "peers": [], "count": 0, "message": "Metrics not available", "stats": {}}
         
-        # 🔥 PRENDE I PEER DA gateway_peers.db (USA GatewayMetrics!)
+        # 🔥 PRENDE I PEER DA gateway_peers.db
         peers = self.metrics.get_all_peers()
         
         if not peers:
             return {"success": True, "peers": [], "count": 0, "message": "No peers in DB", "stats": {}}
         
-        # 🔥 PER OGNI PEER, cerca il nome più recente da announce_cache.db
-        gateways_result = self.discover_gateways(active_only=False)
-        gateways = gateways_result.get("gateways", [])
-        gw_map = {gw.get('gateway_id'): gw for gw in gateways if gw.get('gateway_id')}
+        # 🔥 FILTRA: solo online con Internet (TOR gestito dopo)
+        filtered = [p for p in peers if p.get('is_online') and p.get('has_internet')]
         
-        all_peers = []
-        for p in peers:
-            gw_id = p.get('gateway_id')
-            if gw_id and gw_id in gw_map:
-                gw = gw_map[gw_id]
-                # 🔥 AGGIORNA CON I DATI PIÙ RECENTI DA announce_cache
-                p['name'] = gw.get('name', p.get('name', 'UNKNOWN'))
-                p['hops'] = gw.get('hops', p.get('hops', '?'))
-                if gw.get('last_seen', 0) > p.get('last_seen', 0):
-                    p['last_seen'] = gw.get('last_seen')
-            
-            # 🔥 RECUPERA LO STATO TOR DAL PEER (se disponibile)
-            # (Il gateway deve includere tor_enabled e tor_reachable nella risposta)
-            p['tor_enabled'] = p.get('tor_enabled', False)
-            p['tor_reachable'] = p.get('tor_reachable', False)
-            all_peers.append(p)
+        # 🔥 SE TOR ON, filtra solo TOR
+        if self.use_tor:
+            filtered = [p for p in filtered if p.get('tor_enabled') and p.get('tor_reachable')]
+            if not filtered:
+                return {
+                    "success": True, 
+                    "peers": [], 
+                    "count": 0, 
+                    "message": "Nessun peer TOR + Internet disponibile", 
+                    "stats": {}
+                }
         
-        # 🔥 CALCOLA SCORE PER OGNI PEER (CON BONUS TOR)
-        def calc_score(p):
-            score = 0.0
-            rel = p.get('reliability', 0)
-            score += rel * 40
-            rep = p.get('reputation', 50)
-            score += rep * 0.3
-            latency = p.get('latency_ms')
-            if latency and latency > 0:
-                if latency < 50:    score += 15
-                elif latency < 100: score += 10
-                elif latency < 200: score += 5
-                elif latency < 500: score -= 5
-                else:               score -= 15
-            hops = p.get('hops')
-            if hops:
-                if hops == 1:       score += 10
-                elif hops == 2:     score += 5
-                elif hops == 3:     score += 0
-                else:               score -= hops * 2
-            if p.get('xrp_reachable'):   score += 5
-            if p.get('stellar_reachable'): score += 5
-            if p.get('has_internet'):    score += 3
-            
-            # 🔥 BONUS TOR: +10 se TOR è attivo e raggiungibile
-            if p.get('tor_enabled') and p.get('tor_reachable'):
-                score += 10
-            elif p.get('tor_enabled'):
-                score += 3  # Bonus minore se TOR è attivo ma non raggiungibile
-            
-            return max(0, min(100, score))
+        if not filtered:
+            return {
+                "success": True, 
+                "peers": [], 
+                "count": 0, 
+                "message": "Nessun peer con Internet disponibile", 
+                "stats": {}
+            }
         
-        for p in all_peers:
-            p['_score'] = calc_score(p)
+        # 🔥 ORDINA COME get_best_gateway()
+        filtered.sort(key=lambda p: (
+            p.get('hops', 999),
+            p.get('latency_ms', 99999),
+            -p.get('reputation', 0),
+            -p.get('reliability', 0)
+        ))
         
-        peers_sorted = sorted(all_peers, key=lambda x: x['_score'], reverse=True)
-        
+        # 🔥 CALCOLA STATS
         stats = {
-            "total_peers": len(peers_sorted),
-            "online_peers": sum(1 for p in peers_sorted if p.get('is_online', False)),
-            "offline_peers": sum(1 for p in peers_sorted if not p.get('is_online', False)),
-            "avg_reputation": sum(p.get('reputation', 0) for p in peers_sorted) / len(peers_sorted) if peers_sorted else 0,
-            "avg_latency_ms": sum(p.get('latency_ms', 0) for p in peers_sorted if p.get('latency_ms')) / len(peers_sorted) if peers_sorted else 0,
-            "avg_score": sum(p.get('_score', 0) for p in peers_sorted) / len(peers_sorted) if peers_sorted else 0,
-            "tor_peers": sum(1 for p in peers_sorted if p.get('tor_enabled') and p.get('tor_reachable')),
+            "total_peers": len(filtered),
+            "online_peers": len(filtered),
+            "offline_peers": 0,
+            "avg_reputation": sum(p.get('reputation', 0) for p in filtered) / len(filtered) if filtered else 0,
+            "avg_latency_ms": sum(p.get('latency_ms', 0) for p in filtered if p.get('latency_ms')) / len(filtered) if filtered else 0,
+            "tor_peers": sum(1 for p in filtered if p.get('tor_enabled') and p.get('tor_reachable')),
+            "xrp_peers": sum(1 for p in filtered if p.get('xrp_reachable')),
+            "stellar_peers": sum(1 for p in filtered if p.get('stellar_reachable')),
+            "internet_peers": len(filtered),
         }
         
         return {
             "success": True,
-            "peers": peers_sorted,
-            "count": len(peers_sorted),
+            "peers": filtered,
+            "count": len(filtered),
             "message": "OK",
             "stats": stats
         }
@@ -2115,7 +2126,7 @@ class WalletBackend:
             return {"success": False, "message": "Request failed"}
     
     def test_all_gateways(self) -> Dict[str, Any]:
-        """Testa tutti i gateway attivi - USA GatewayMetrics"""
+        """Testa tutti i gateway attivi - USA GatewayMetrics con timeout più lungo per radio"""
         if not self.metrics:
             return {"success": False, "results": [], "count": 0, "message": "Metrics not available"}
         
@@ -2131,6 +2142,9 @@ class WalletBackend:
         successful = 0
         results = []
         
+        # 🔥 TIMEOUT PIÙ LUNGO PER RADIO (60 secondi)
+        timeout_seconds = 60
+        
         for gw in gateways:
             gw_id = gw.get('gateway_id', '')
             name = gw.get('name', 'UNKNOWN')
@@ -2142,7 +2156,7 @@ class WalletBackend:
             print(f"[{timestamp}] 📡 Testando: {name} ({gw_id})")
             
             try:
-                success = self.metrics.request_gateway_info(gw_id)
+                success = self.metrics.request_gateway_info(gw_id, timeout_seconds=timeout_seconds)
                 tested += 1
                 
                 if success:
@@ -2150,7 +2164,6 @@ class WalletBackend:
                     status = "✅ ONLINE"
                     print(f"   ✅ Risposta ricevuta!")
                     
-                    # 🔥 RECUPERA STATI DAL PEER
                     peers = self.metrics.get_all_peers()
                     has_internet = False
                     tor_enabled = False
@@ -2189,7 +2202,7 @@ class WalletBackend:
                         conn.close()
                     except:
                         pass
-                    
+                        
             except Exception as e:
                 status = f"❌ ERRORE"
                 has_internet = False
