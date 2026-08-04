@@ -324,44 +324,25 @@ class GatewayServerHandler:
             
             print(f"📥 Pacchetto ricevuto: {data.get('type', 'unknown')}")
             
-            if data.get("type") == "ledger_relay":
-                if not self.metrics:
-                    print("⚠️ Metrics non disponibile, ignoro richiesta ledger_relay")
-                    return
-                
-                if ReticulumManager._server_handler:
-                    ReticulumManager._server_handler._handle_packet(message, packet)
-                else:
-                    print("⚠️ Server handler non disponibile")
-                return
-            
-            # 🔥 GESTISCI RICHIESTE INFO - CORRETTO!
+            # 🔥 GESTISCI RICHIESTE INFO - USA RESOURCE
             if data.get("type") == "info_request":
                 if not self.metrics:
                     print("⚠️ Metrics non disponibile, ignoro richiesta info")
                     return
                 
                 try:
-                    # 🔥 PASSA IL LINK
                     response = self.metrics.process_info_request(data, link=packet.link)
                     
                     if response:
                         response_bytes = response.encode()
                         
-                        # 🔥 SE TROPPO GRANDE PER MTU 500, USA RESOURCE
                         if len(response_bytes) > 450:
                             print(f"📤 Risposta grande ({len(response_bytes)} bytes), uso Resource...")
-                            # Usa il metodo di GatewayServerHandler che crea il Resource correttamente
-                            if ReticulumManager._server_handler:
-                                ReticulumManager._server_handler._send_response_as_resource(packet.link, response_bytes)
-                            else:
-                                print("⚠️ Server handler non disponibile per Resource")
-                                Packet(packet.link, response_bytes).send()
+                            self._send_response_as_resource(packet.link, response_bytes)
                         else:
                             Packet(packet.link, response_bytes).send()
                             print(f"📤 Risposta info inviata ({len(response_bytes)} bytes)")
                         
-                        # Chiudi link dopo risposta
                         try:
                             time.sleep(0.1)
                             if packet.link and packet.link.is_established():
@@ -375,6 +356,61 @@ class GatewayServerHandler:
                     print(f"⚠️ Errore generazione risposta info: {e}")
                     import traceback
                     traceback.print_exc()
+                return
+            
+            # 🔥 GESTISCI RICHIESTE LEDGER RELAY
+            if data.get("type") == "ledger_relay":
+                if not self.metrics:
+                    print("⚠️ Metrics non disponibile, ignoro richiesta ledger_relay")
+                    return
+                
+                operation = data.get("operation")
+                payload = data.get("payload", {})
+                
+                if operation == "get_balance":
+                    result = self._handle_get_balance(payload)
+                elif operation == "get_history":
+                    result = self._handle_get_history(payload)
+                elif operation == "submit_transaction":
+                    result = self._handle_submit_transaction(payload)
+                elif operation == "get_account_info":
+                    result = self._handle_get_account_info(payload)
+                elif operation == "get_ledger_info":
+                    result = self._handle_get_ledger_info(payload)
+                else:
+                    result = {"error": f"Operazione non supportata: {operation}"}
+                
+                if result.get("error"):
+                    response_data = {
+                        "type": "ledger_relay_response",
+                        "success": False,
+                        "error": result["error"],
+                        "timestamp": int(time.time())
+                    }
+                else:
+                    response_data = {
+                        "type": "ledger_relay_response",
+                        "success": True,
+                        "result": result,
+                        "timestamp": int(time.time())
+                    }
+                
+                response_bytes = json.dumps(response_data).encode()
+                
+                if len(response_bytes) > 450:
+                    print(f"📤 Risposta ledger grande ({len(response_bytes)} bytes), uso Resource...")
+                    self._send_response_as_resource(packet.link, response_bytes)
+                else:
+                    Packet(packet.link, response_bytes).send()
+                    print(f"📤 Risposta ledger inviata ({len(response_bytes)} bytes)")
+                
+                try:
+                    time.sleep(0.1)
+                    if packet.link and packet.link.is_established():
+                        packet.link.teardown()
+                        print("🔗 Link chiuso dopo risposta ledger")
+                except:
+                    pass
                 return
             
             print(f"📥 Tipo pacchetto sconosciuto: {data.get('type')}")
@@ -397,15 +433,12 @@ class GatewayServerHandler:
         import tempfile
         
         try:
-            # Crea un file temporaneo reale
             with tempfile.NamedTemporaryFile(mode='wb', suffix='.json', delete=False) as tmp:
                 tmp.write(data)
                 tmp_path = tmp.name
             
-            # Aprilo come file reale
             file_obj = open(tmp_path, 'rb')
             
-            # Crea il resource
             resource = RNS.Resource(
                 file_obj,
                 link,
@@ -421,8 +454,6 @@ class GatewayServerHandler:
             traceback.print_exc()
     
     def _resource_sent_callback(self, resource, tmp_path=None):
-        """Callback quando il resource è stato inviato"""
-        # Pulisci il file temporaneo
         if tmp_path:
             try:
                 if os.path.exists(tmp_path):
@@ -464,7 +495,6 @@ class GatewayServerHandler:
             return {"error": str(e)}
 
     def _handle_get_ledger_info(self, payload: Dict) -> Dict:
-        """Restituisce il ledger corrente e la fee base."""
         try:
             from xrpl.clients import JsonRpcClient
             from xrpl.models.requests import Ledger
@@ -488,34 +518,6 @@ class GatewayServerHandler:
             }
         except Exception as e:
             return {"error": str(e)}
-
-    # ============================================================
-    # METODI PER LEDGER RELAY
-    # ============================================================
-    
-    def _process_ledger_relay(self, request: Dict) -> Dict:
-        operation = request.get("operation")
-        payload = request.get("payload", {})
-        
-        if operation == "get_balance":
-            result = self._handle_get_balance(payload)
-        elif operation == "get_history":
-            result = self._handle_get_history(payload)
-        elif operation == "submit_transaction":
-            result = self._handle_submit_transaction(payload)
-        elif operation == "send_payment":
-            result = self._handle_send_payment(payload)
-        elif operation == "get_ledger_info":
-            result = self._handle_get_ledger_info(payload)
-        elif operation == "get_account_info":
-            result = self._handle_get_account_info(payload)
-        else:
-            return {"success": False, "error": f"Operazione non supportata: {operation}"}
-        
-        if result.get("error"):
-            return {"success": False, "error": result["error"]}
-        
-        return {"success": True, "result": result}
     
     def _handle_get_balance(self, payload: Dict) -> Dict:
         address = payload.get("address")
@@ -552,7 +554,6 @@ class GatewayServerHandler:
             return {"error": str(e)}
     
     def _handle_get_account_info(self, payload: Dict) -> Dict:
-        """Restituisce le info dell'account (sequence, balance, ledger_index)."""
         try:
             from xrpl.clients import JsonRpcClient
             from xrpl.models.requests import AccountInfo
@@ -650,25 +651,6 @@ class GatewayServerHandler:
             
             return {"error": f"Crypto non supportata: {crypto}"}
             
-        except Exception as e:
-            return {"error": str(e)}
-    
-    def _handle_send_payment(self, payload: Dict) -> Dict:
-        tx_blob = payload.get("tx_blob")
-        if not tx_blob:
-            return {"error": "tx_blob mancante"}
-        
-        try:
-            from xrpl.transaction import submit_and_wait
-            from xrpl.clients import JsonRpcClient
-            
-            client = JsonRpcClient("https://s1.ripple.com:51234/")
-            response = submit_and_wait(tx_blob, client)
-            
-            return {
-                "tx_hash": response.result.get("hash"),
-                "ledger": response.result.get("ledger_index")
-            }
         except Exception as e:
             return {"error": str(e)}
 
@@ -897,7 +879,6 @@ class ReticulumManager:
             )
             ReticulumManager._server_handler.start()
             
-            # 🔥 PASSA TOR A METRICS
             self.metrics.set_use_tor(self.config.use_tor)
         else:
             print("⚠️ Metrics non disponibile, server /info non avviato")
@@ -930,59 +911,31 @@ class ReticulumManager:
                 self.stop_gateway()
 
     def _handle_packet(self, message, packet):
+        """Gestisce pacchetti che arrivano DIRETTAMENTE al gateway_dest (senza link)"""
         try:
             if not message:
-                print("⚠️ Pacchetto vuoto ricevuto")
                 return
             
             try:
                 data = json.loads(message.decode())
-            except json.JSONDecodeError as e:
-                print(f"⚠️ JSON non valido: {e}")
-                return
-            except UnicodeDecodeError as e:
-                print(f"⚠️ Decodifica UTF-8 fallita: {e}")
+            except:
                 return
             
             if not isinstance(data, dict):
-                print(f"⚠️ Pacchetto non è un dict: {type(data)}")
                 return
             
-            print(f"📥 Pacchetto ricevuto: {data.get('type', 'unknown')}")
+            print(f"📥 Pacchetto ricevuto (senza link): {data.get('type', 'unknown')}")
             
-            # 🔥 SE È UNA RICHIESTA INFO VIA PACCHETTO (NON LINK)
-            # DELEGA A GatewayServerHandler SE DISPONIBILE
-            if data.get("type") == "info_request":
-                if ReticulumManager._server_handler:
-                    # 🔥 PASSA AL SERVER HANDLER CHE SA USARE RESOURCE
-                    ReticulumManager._server_handler._handle_packet(message, packet)
-                else:
-                    print("⚠️ Server handler non disponibile per info_request")
-                return
+            # 🔥 I pacchetti via link sono già gestiti da GatewayServerHandler
+            # Qui arrivano solo annunci e broadcast
             
-            if data.get("type") == "ledger_relay":
-                if not self.metrics:
-                    print("⚠️ Metrics non disponibile, ignoro richiesta ledger_relay")
-                    return
-                
-                if ReticulumManager._server_handler:
-                    ReticulumManager._server_handler._handle_packet(message, packet)
-                else:
-                    print("⚠️ Server handler non disponibile")
-                return
-            
-            print(f"📥 Tipo pacchetto sconosciuto: {data.get('type')}")
-                
         except Exception as e:
-            print(f"⚠️ Errore critico elaborazione pacchetto: {e}")
-            import traceback
-            traceback.print_exc()
+            print(f"⚠️ Errore: {e}")
         finally:
             if packet and hasattr(packet, 'link') and packet.link:
                 try:
                     if packet.link.is_established():
                         packet.link.teardown()
-                        print("🔗 Link chiuso (cleanup finale)")
                 except:
                     pass
 
