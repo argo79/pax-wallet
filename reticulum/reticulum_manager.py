@@ -279,9 +279,42 @@ class GatewayServerHandler:
                 self._link_hops[id(link)] = link.hops
                 print(f"📊 Hops: {link.hops}")
         
+        # 🔥 IMPOSTA LA STRATEGIA PER ACCETTARE RESOURCE
+        link.set_resource_strategy(RNS.Link.ACCEPT_ALL)
+        
+        # 🔥 CALLBACK PER RESOURCE IN ARRIVO
+        link.set_resource_started_callback(self._on_resource_started)
+        link.set_resource_concluded_callback(self._on_resource_concluded)
+        
         link.set_packet_callback(self._handle_packet)
-        link.set_resource_strategy(RNS.Link.ACCEPT_NONE)
         link.set_link_closed_callback(self._on_link_closed)
+    
+    def _on_resource_started(self, resource):
+        """Callback quando inizia la ricezione di un Resource"""
+        print(f"📥 Ricezione resource iniziata ({resource.total_size} bytes)")
+    
+    def _on_resource_concluded(self, resource):
+        """Callback quando un Resource è stato ricevuto completamente"""
+        try:
+            if resource.status == RNS.Resource.COMPLETE:
+                data = resource.data.read()
+                print(f"✅ Resource ricevuto ({len(data)} bytes)")
+                
+                # 🔥 PROCESSA IL RESOURCE COME UN PACCHETTO
+                try:
+                    message = data.decode()
+                    # Chiama _handle_packet con packet=None (non chiudere il link)
+                    self._handle_packet(message, None)
+                except Exception as e:
+                    print(f"⚠️ Errore elaborazione resource: {e}")
+                    import traceback
+                    traceback.print_exc()
+            else:
+                print(f"❌ Resource fallito: {resource.status}")
+        except Exception as e:
+            print(f"⚠️ Errore lettura resource: {e}")
+            import traceback
+            traceback.print_exc()
     
     def _on_link_closed(self, link):
         print("❌ Client disconnesso")
@@ -309,13 +342,15 @@ class GatewayServerHandler:
                 print("⚠️ Pacchetto vuoto ricevuto")
                 return
             
+            # 🔥 SE packet è None, significa che viene da Resource
+            is_from_resource = (packet is None)
+            
             # 🔥 PRIMA PROVA A DECODIFICARE COME JSON
             data = None
             try:
                 data = json.loads(message.decode())
             except (json.JSONDecodeError, UnicodeDecodeError):
-                # Potrebbe essere un Resource (dati binari)
-                print("📥 Pacchetto non JSON (probabilmente Resource), ignoro")
+                print("📥 Pacchetto non JSON, ignoro")
                 return
             
             if not isinstance(data, dict):
@@ -331,25 +366,26 @@ class GatewayServerHandler:
                     return
                 
                 try:
-                    response = self.metrics.process_info_request(data, link=packet.link)
+                    response = self.metrics.process_info_request(data, link=self.latest_link)
                     
                     if response:
                         response_bytes = response.encode()
                         
                         if len(response_bytes) > 450:
                             print(f"📤 Risposta grande ({len(response_bytes)} bytes), uso Resource...")
-                            self._send_response_as_resource(packet.link, response_bytes)
+                            self._send_response_as_resource(self.latest_link, response_bytes)
                         else:
-                            Packet(packet.link, response_bytes).send()
+                            Packet(self.latest_link, response_bytes).send()
                             print(f"📤 Risposta info inviata ({len(response_bytes)} bytes)")
                         
-                        try:
-                            time.sleep(0.1)
-                            if packet.link and packet.link.is_established():
-                                packet.link.teardown()
-                                print("🔗 Link chiuso dopo risposta")
-                        except:
-                            pass
+                        if not is_from_resource:
+                            try:
+                                time.sleep(0.1)
+                                if packet and packet.link and packet.link.is_established():
+                                    packet.link.teardown()
+                                    print("🔗 Link chiuso dopo risposta")
+                            except:
+                                pass
                     else:
                         print("⚠️ Nessuna risposta generata")
                 except Exception as e:
@@ -409,21 +445,27 @@ class GatewayServerHandler:
                 
                 response_bytes = json.dumps(response_data).encode()
                 
+                # 🔥 USA IL LINK CORRETTO
+                link_to_use = self.latest_link
+                if packet and hasattr(packet, 'link') and packet.link:
+                    link_to_use = packet.link
+                
                 # 🔥 SE TROPPO GRANDE PER MTU 500, USA RESOURCE
                 if len(response_bytes) > 450:
                     print(f"📤 Risposta ledger grande ({len(response_bytes)} bytes), uso Resource...")
-                    self._send_response_as_resource(packet.link, response_bytes)
+                    self._send_response_as_resource(link_to_use, response_bytes)
                 else:
-                    Packet(packet.link, response_bytes).send()
+                    Packet(link_to_use, response_bytes).send()
                     print(f"📤 Risposta ledger inviata ({len(response_bytes)} bytes)")
                 
-                try:
-                    time.sleep(0.1)
-                    if packet.link and packet.link.is_established():
-                        packet.link.teardown()
-                        print("🔗 Link chiuso dopo risposta ledger")
-                except:
-                    pass
+                if not is_from_resource:
+                    try:
+                        time.sleep(0.1)
+                        if packet and packet.link and packet.link.is_established():
+                            packet.link.teardown()
+                            print("🔗 Link chiuso dopo risposta ledger")
+                    except:
+                        pass
                 return
             
             print(f"📥 Tipo pacchetto sconosciuto: {data.get('type')}")
@@ -433,13 +475,15 @@ class GatewayServerHandler:
             import traceback
             traceback.print_exc()
         finally:
-            if packet and hasattr(packet, 'link') and packet.link:
-                try:
-                    if packet.link.is_established():
-                        packet.link.teardown()
-                        print("🔗 Link chiuso (cleanup finale)")
-                except:
-                    pass
+            # 🔥 NON CHIUDERE IL LINK SE VIENE DA RESOURCE
+            if not is_from_resource:
+                if packet and hasattr(packet, 'link') and packet.link:
+                    try:
+                        if packet.link.is_established():
+                            packet.link.teardown()
+                            print("🔗 Link chiuso (cleanup finale)")
+                    except:
+                        pass
     
     def _send_response_as_resource(self, link, data: bytes):
         """Invia dati grandi come Resource usando un file temporaneo"""
@@ -932,9 +976,7 @@ class ReticulumManager:
             # 🔥 VERIFICA SE È UN PACCHETTO VIA LINK
             if hasattr(packet, 'link') and packet.link is not None:
                 # I pacchetti via link sono gestiti da GatewayServerHandler
-                # Ma se arrivano qui, potrebbero essere Resource
-                print("📥 Pacchetto via link (dovrebbe essere gestito da GatewayServerHandler)")
-                # Non fare nulla, GatewayServerHandler se ne occupa
+                print("📥 Pacchetto via link (gestito da GatewayServerHandler)")
                 return
             
             # 🔥 PACCHETTI SENZA LINK (annunci, broadcast)
