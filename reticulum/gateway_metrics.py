@@ -334,7 +334,7 @@ class GatewayMetrics:
     # ============================================================
     
     def process_info_request(self, request_data: dict, link=None) -> Optional[str]:
-        """Processa una richiesta info - USA RESOURCE per MTU 500"""
+        """Processa una richiesta info - RESTITUISCE JSON, il chiamante usa Resource"""
         try:
             client_hops = request_data.get("hops", None)
             client_rtt = request_data.get("rtt_ms", None)
@@ -385,35 +385,7 @@ class GatewayMetrics:
                 }, self.identity)
             }
             
-            response_json = json.dumps(response_dict)
-            response_bytes = response_json.encode()
-            
-            # 🔥 SE LINK DISPONIBILE, USA RESOURCE
-            if link is not None:
-                try:
-                    from RNS import Resource
-                    print(f"📤 Invio risposta via Resource ({len(response_bytes)} bytes)")
-                    # 🔥 RESOURCE GESTISCE AUTOMATICAMENTE LO CHUNKING PER MTU
-                    resource = Resource(link, response_bytes, is_response=True)
-                    # Aspetta completamento per radio (timeout più lungo)
-                    start = time.time()
-                    while not resource.is_complete() and (time.time() - start) < 60:
-                        time.sleep(0.1)
-                    if resource.is_complete():
-                        print(f"✅ Resource inviato completato")
-                    else:
-                        print(f"⚠️ Resource non completato in tempo")
-                    return None
-                except Exception as e:
-                    print(f"⚠️ Errore invio Resource: {e}")
-                    # Fallback: solo se pacchetto piccolo
-                    if len(response_bytes) < 450:
-                        print(f"📤 Fallback pacchetto ({len(response_bytes)} bytes)")
-                        return response_json
-                    print(f"❌ Response troppo grande per pacchetto")
-                    return None
-            
-            return response_json
+            return json.dumps(response_dict)
             
         except Exception as e:
             print(f"⚠️ Errore processing_info_request: {e}")

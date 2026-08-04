@@ -342,7 +342,7 @@ class GatewayServerHandler:
                     return
                 
                 try:
-                    # 🔥 PASSA IL LINK PER USARE RESOURCE
+                    # 🔥 PASSA IL LINK
                     response = self.metrics.process_info_request(data, link=packet.link)
                     
                     if response:
@@ -351,8 +351,12 @@ class GatewayServerHandler:
                         # 🔥 SE TROPPO GRANDE PER MTU 500, USA RESOURCE
                         if len(response_bytes) > 450:
                             print(f"📤 Risposta grande ({len(response_bytes)} bytes), uso Resource...")
+                            # Usa il metodo di GatewayServerHandler che crea il Resource correttamente
                             if ReticulumManager._server_handler:
                                 ReticulumManager._server_handler._send_response_as_resource(packet.link, response_bytes)
+                            else:
+                                print("⚠️ Server handler non disponibile per Resource")
+                                Packet(packet.link, response_bytes).send()
                         else:
                             Packet(packet.link, response_bytes).send()
                             print(f"📤 Risposta info inviata ({len(response_bytes)} bytes)")
@@ -366,7 +370,7 @@ class GatewayServerHandler:
                         except:
                             pass
                     else:
-                        print("📤 Risposta inviata via Resource")
+                        print("⚠️ Nessuna risposta generata")
                 except Exception as e:
                     print(f"⚠️ Errore generazione risposta info: {e}")
                     import traceback
@@ -946,6 +950,16 @@ class ReticulumManager:
             
             print(f"📥 Pacchetto ricevuto: {data.get('type', 'unknown')}")
             
+            # 🔥 SE È UNA RICHIESTA INFO VIA PACCHETTO (NON LINK)
+            # DELEGA A GatewayServerHandler SE DISPONIBILE
+            if data.get("type") == "info_request":
+                if ReticulumManager._server_handler:
+                    # 🔥 PASSA AL SERVER HANDLER CHE SA USARE RESOURCE
+                    ReticulumManager._server_handler._handle_packet(message, packet)
+                else:
+                    print("⚠️ Server handler non disponibile per info_request")
+                return
+            
             if data.get("type") == "ledger_relay":
                 if not self.metrics:
                     print("⚠️ Metrics non disponibile, ignoro richiesta ledger_relay")
@@ -955,49 +969,6 @@ class ReticulumManager:
                     ReticulumManager._server_handler._handle_packet(message, packet)
                 else:
                     print("⚠️ Server handler non disponibile")
-                return
-            
-            if data.get("type") == "info_request":
-                if not self.metrics:
-                    print("⚠️ Metrics non disponibile, ignoro richiesta info")
-                    return
-                
-                try:
-                    response = self.metrics.process_info_request(data)
-                    if response:
-                        if isinstance(response, str) and len(response) > 0:
-                            if len(response) > 1024 * 1024:
-                                print("⚠️ Risposta troppo grande, troncata")
-                                response = response[:1024*1024]
-                            
-                            print(f"\n📤 RISPOSTA /info INVIATA:")
-                            print(f"{'='*60}")
-                            if len(response) > 500:
-                                print(f"{response[:500]}...")
-                            else:
-                                print(f"{response}")
-                            print(f"{'='*60}")
-                            
-                            if packet and hasattr(packet, 'link') and packet.link:
-                                if packet.link.is_established():
-                                    Packet(packet.link, response.encode()).send()
-                                    
-                                    try:
-                                        time.sleep(0.1)
-                                        packet.link.teardown()
-                                        print("🔗 Link chiuso dopo risposta inviata")
-                                    except Exception as e:
-                                        print(f"⚠️ Errore chiusura link: {e}")
-                                else:
-                                    print("⚠️ Link non più attivo")
-                            else:
-                                print("⚠️ Pacchetto senza link valido")
-                        else:
-                            print("⚠️ Risposta vuota o non valida")
-                    else:
-                        print("⚠️ Nessuna risposta generata")
-                except Exception as e:
-                    print(f"⚠️ Errore generazione risposta info: {e}")
                 return
             
             print(f"📥 Tipo pacchetto sconosciuto: {data.get('type')}")
