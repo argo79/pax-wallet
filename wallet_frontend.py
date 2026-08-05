@@ -491,28 +491,53 @@ class PaxWalletCLI:
         print("=" * 120)
     
     def _cmd_send(self):
-        """Invia pagamento"""
+        """Invia pagamento XRP/XLM con memo opzionalmente cifrato"""
         to_addr = input("Indirizzo destinatario: ").strip()
         if not to_addr:
+            print_red("❌ Indirizzo destinatario obbligatorio")
             return
+
         try:
             amount = float(input("Ammontare: ").strip())
+            if amount <= 0:
+                print_red("❌ L'ammontare deve essere maggiore di zero")
+                return
         except ValueError:
-            print_red("❌ Ammontare non valido")
+            print_red("❌ Ammontare non valido (usa il punto come separatore decimale)")
             return
+
         memo = input("Memo (opzionale): ").strip()
-        
-        result = self.backend.send_payment(to_addr, amount, memo)
-        
-        # 🔥 SE È VIA RETICULUM, MOSTRA IN BLU
+        encrypt = input("Cifrare il memo? (s/N): ").strip().lower() == 's'
+
+        if encrypt and memo:
+            print_blue("🔐 Tentativo di cifratura memo...")
+        elif memo and not encrypt:
+            print_yellow("ℹ️ Memo inviato in chiaro (non cifrato)")
+
+        # Controllo lunghezza memo (solo per XRP, il backend lo fa ma meglio avvisare)
+        if memo and len(memo) > 700 and self.backend.wallet._xrp_manager.crypto_type == "XRP":
+            print_yellow("⚠️ Memo molto lungo (oltre 700 caratteri). La cifratura aumenterà la dimensione, assicurati che sia sotto 1KB.")
+            if not input("   Continuare? (s/N): ").strip().lower() == 's':
+                return
+
+        result = self.backend.send_payment(to_addr, amount, memo, encrypt_memo=encrypt)
+
         if result.get("via_reticulum", False):
             print_blue(f"📡 Richiesta transazione via Reticulum")
-        
+
         if result.get("success"):
             print_green(f"✅ Pagamento inviato!")
             print(f"   Hash: {result.get('tx_hash', 'N/A')}")
+            if result.get("tx_hash"):
+                # Mostra link esploratore per testnet/mainnet
+                network = self.backend.wallet._xrp_manager.network
+                if network == "mainnet":
+                    explorer = f"https://xrpscan.com/tx/{result['tx_hash']}"
+                else:
+                    explorer = f"https://testnet.xrpl.org/transactions/{result['tx_hash']}"
+                print(f"   🔗 {explorer}")
         else:
-            print_red(f"❌ {result.get('message', 'Errore')}")
+            print_red(f"❌ {result.get('message', 'Errore sconosciuto')}")
     
     def _cmd_info(self):
         """Info wallet - SOLO DATI PUBBLICI"""
@@ -1078,105 +1103,133 @@ class PaxWalletCLI:
         print(f"Totale: {len(wallets)} wallet in cache")
         print("=" * 100)
     
-    def _cmd_peer_metrics(self):
-        """Peer metriche"""
-        result = self.backend.get_peer_metrics()
+    def peer_metrics(self):
+        self.clear_output()
+        self.output("📊 PEER METRICHE")
+        self.show_status("⏳ Caricamento metriche...")
         
-        if not result.get("success"):
-            print_red(f"❌ {result.get('message', 'Error')}")
-            return
-        
-        peers = result.get("peers", [])
-        if not peers:
-            print_yellow(f"⚠️ {result.get('message', 'Nessun peer disponibile')}")
-            return
-        
-        # 🔥 MOSTRA FILTRO APPLICATO
-        if self.backend.use_tor:
-            print_blue("🧅 TOR ON: gateway filtrati per TOR + Internet")
+        result = self.main.backend.get_peer_metrics()
+        if result.get("success"):
+            peers = result.get("peers", [])
+            stats = result.get("stats", {})
+            
+            if not peers:
+                self.output("❌ Nessun peer trovato")
+                self.show_status("Nessun peer trovato")
+                return
+            
+            # 🔥 MOSTRA FILTRO APPLICATO (COME IN CLI)
+            if self.main.backend.use_tor:
+                self.output("🧅 TOR ON: gateway filtrati per TOR + Internet")
+            else:
+                self.output("🌐 TOR OFF: gateway filtrati per Internet")
+            
+            # 🔥 INTESTAZIONE TABELLA (COME IN CLI)
+            self.output(f"✅ Trovati {len(peers)} peer")
+            self.output("=" * 280)
+            self.output(f"{'#':<3} {'Nome':<22} {'Score':<6} {'Rel':<6} {'Rep':<4} {'Hops':<5} {'RTT':<8} {'XRP':<14} {'Stellar':<14} {'Internet':<9} {'TOR':<6} {'Ultimo visto':<15} {'ID':<36} {'Assets'}")
+            self.output("-" * 280)
+            
+            # 🔥 AGGIUNGI I PEER (CON TUTTI I DATI COME IN CLI)
+            for idx, p in enumerate(peers, 1):
+                name = str(p.get('name', 'UNKNOWN'))[:16]
+                sc = round(p.get('_score', 0))
+                rel = round(p.get('reliability', 0), 2)
+                rep = p.get('reputation', 50)
+                hops = str(p.get('hops', '?'))
+                rtt = p.get('latency_ms')
+                rtt_str = f"{rtt:.0f}ms" if rtt is not None else "?ms"
+                
+                # XRP (COME IN CLI)
+                if p.get('xrp_reachable'):
+                    xrp_lat = p.get('xrp_latency_ms')
+                    xrp_str = f"✅{xrp_lat:.0f}ms" if xrp_lat is not None else "✅ OK"
+                else:
+                    xrp_str = "❌"
+                
+                # Stellar (COME IN CLI)
+                if p.get('stellar_reachable'):
+                    stellar_lat = p.get('stellar_latency_ms')
+                    stellar_str = f"✅{stellar_lat:.0f}ms" if stellar_lat is not None else "✅ OK"
+                else:
+                    stellar_str = "❌"
+                
+                # Internet (COME IN CLI)
+                internet = "🌐" if p.get('has_internet') else "📡"
+                
+                # TOR (COME IN CLI)
+                tor_enabled = p.get('tor_enabled', False)
+                tor_reachable = p.get('tor_reachable', False)
+                if tor_enabled and tor_reachable:
+                    tor_str = "🧅✅"
+                elif tor_enabled:
+                    tor_str = "🧅❌"
+                else:
+                    tor_str = "—"
+                
+                # Last seen (COME IN CLI)
+                last_seen = format_time_ago(p.get('last_seen'))
+                
+                # Gateway ID (COME IN CLI)
+                gw_id = p.get('gateway_id', 'N/A')[:36]
+                
+                # Assets (COME IN CLI)
+                assets = p.get('assets', [])
+                if isinstance(assets, list):
+                    assets_str = ', '.join(assets[:3])
+                    if len(assets) > 3:
+                        assets_str += f" +{len(assets)-3}"
+                else:
+                    assets_str = str(assets)[:20]
+                
+                # 🔥 CREA LA RIGA ESATTAMENTE COME IN CLI
+                text = f"{idx:<3} {name:<20} {sc:<6} {rel:<6} {rep:<4} {hops:<5} {rtt_str:<8} {xrp_str:<14} {stellar_str:<14} {internet:<9} {tor_str:<6} {last_seen:<15} {gw_id:<36} {assets_str}"
+                
+                # 🔥 AGGIUNGI ITEM CLICCABILE CON TUTTI I DATI
+                item = QListWidgetItem(text)
+                item.setData(Qt.UserRole, {"type": "peer", "data": p})
+                self.output_list.addItem(item)
+            
+            self.output("=" * 280)
+            
+            # 🔥 STATISTICHE (COME IN CLI)
+            if stats:
+                self.output(f"\n📊 Statistiche:")
+                self.output(f"   Totale peer: {stats.get('total_peers', 0)}")
+                if stats.get('online_peers', 0) > 0:
+                    self.output(f"   Online: {stats.get('online_peers', 0)}")
+                if stats.get('tor_peers', 0) > 0:
+                    self.output(f"   Gateway con TOR: {stats.get('tor_peers')}")
+                if stats.get('xrp_peers', 0) > 0:
+                    self.output(f"   Gateway con XRP: {stats.get('xrp_peers')}")
+                if stats.get('stellar_peers', 0) > 0:
+                    self.output(f"   Gateway con Stellar: {stats.get('stellar_peers')}")
+                if stats.get('avg_latency_ms', 0) > 0:
+                    self.output(f"   Latenza media: {round(stats.get('avg_latency_ms'), 0)}ms")
+            
+            # 🔥 MIGLIOR PEER (COME IN CLI)
+            if peers:
+                b = peers[0]
+                self.output(f"\n🏆 MIGLIOR PEER: {b.get('name', 'UNKNOWN')}")
+                self.output(f"   Hops: {b.get('hops', '?')} | RTT: {b.get('latency_ms', '?')}ms")
+                self.output(f"   XRP: {'✅' if b.get('xrp_reachable') else '❌'} ({b.get('xrp_latency_ms', '?')}ms)")
+                self.output(f"   Stellar: {'✅' if b.get('stellar_reachable') else '❌'} ({b.get('stellar_latency_ms', '?')}ms)")
+                self.output(f"   Internet: {'✅' if b.get('has_internet') else '❌'}")
+                tor_enabled = b.get('tor_enabled', False)
+                tor_reachable = b.get('tor_reachable', False)
+                if tor_enabled and tor_reachable:
+                    self.output(f"   TOR: ✅ Attivo e raggiungibile")
+                elif tor_enabled:
+                    self.output(f"   TOR: ⚠️ Attivo ma non raggiungibile")
+                else:
+                    self.output(f"   TOR: ❌ Non attivo")
+                if b.get('assets'):
+                    self.output(f"   Assets: {', '.join(b.get('assets', []))}")
+            
+            self.show_status(f"Trovati {len(peers)} peer")
         else:
-            print_green("🌐 TOR OFF: gateway filtrati per Internet")
-        
-        print_bold(f"\n🔍 PEER ORDINATI PER PERFORMANCE ({len(peers)})")
-        print("=" * 280)
-        print(f"{'#':<3} {'Nome':<22} {'Hops':<5} {'RTT':<8} {'XRP':<14} {'Stellar':<14} {'Internet':<9} {'TOR':<6} {'Ultimo visto':<15} {'ID':<36} {'Assets'}")
-        print("-" * 280)
-        
-        for idx, p in enumerate(peers, 1):
-            name = str(p.get('name', 'UNKNOWN'))[:16]
-            hops = str(p.get('hops', '?'))
-            rtt = f"{p.get('latency_ms', '?')}ms"
-            
-            # XRP
-            if p.get('xrp_reachable'):
-                xrp_lat = p.get('xrp_latency_ms')
-                xrp_str = f"✅{xrp_lat}ms" if xrp_lat else "✅ OK"
-            else:
-                xrp_str = "❌"
-            
-            # Stellar
-            if p.get('stellar_reachable'):
-                stellar_lat = p.get('stellar_latency_ms')
-                stellar_str = f"✅{stellar_lat}ms" if stellar_lat else "✅ OK"
-            else:
-                stellar_str = "❌"
-            
-            internet = "🌐" if p.get('has_internet') else "📡"
-            last_seen = format_time_ago(p.get('last_seen'))
-            gw_id = p.get('gateway_id', 'N/A')[:36]
-            
-            # TOR
-            tor_enabled = p.get('tor_enabled', False)
-            tor_reachable = p.get('tor_reachable', False)
-            if tor_enabled and tor_reachable:
-                tor_str = "🧅✅"
-            elif tor_enabled:
-                tor_str = "🧅❌"
-            else:
-                tor_str = "—"
-            
-            assets = p.get('assets', [])
-            if isinstance(assets, list):
-                assets_str = ', '.join(assets[:3])
-                if len(assets) > 3:
-                    assets_str += f" +{len(assets)-3}"
-            else:
-                assets_str = str(assets)[:20]
-            
-            print(f"{idx:<3} {name:<20} {hops:<5} {rtt:<8} {xrp_str:<14} {stellar_str:<14} {internet:<9} {tor_str:<6} {last_seen:<15} {gw_id:<36} {assets_str}")
-        
-        print("=" * 280)
-        
-        stats = result.get("stats", {})
-        if stats:
-            print(f"\n📊 Statistiche:")
-            print(f"   Totale peer: {stats.get('total_peers', 0)}")
-            if stats.get('tor_peers', 0) > 0:
-                print(f"   Gateway con TOR: {stats.get('tor_peers')}")
-            if stats.get('xrp_peers', 0) > 0:
-                print(f"   Gateway con XRP: {stats.get('xrp_peers')}")
-            if stats.get('stellar_peers', 0) > 0:
-                print(f"   Gateway con Stellar: {stats.get('stellar_peers')}")
-            if stats.get('avg_latency_ms'):
-                print(f"   Latenza media: {round(stats.get('avg_latency_ms'), 0)}ms")
-        
-        if peers:
-            b = peers[0]
-            print(f"\n🏆 MIGLIOR PEER: {b.get('name', 'UNKNOWN')}")
-            print(f"   Hops: {b.get('hops', '?')} | RTT: {b.get('latency_ms', '?')}ms")
-            print(f"   XRP: {'✅' if b.get('xrp_reachable') else '❌'} ({b.get('xrp_latency_ms', '?')}ms)")
-            print(f"   Stellar: {'✅' if b.get('stellar_reachable') else '❌'} ({b.get('stellar_latency_ms', '?')}ms)")
-            print(f"   Internet: {'✅' if b.get('has_internet') else '❌'}")
-            tor_enabled = b.get('tor_enabled', False)
-            tor_reachable = b.get('tor_reachable', False)
-            if tor_enabled and tor_reachable:
-                print(f"   TOR: ✅ Attivo e raggiungibile")
-            elif tor_enabled:
-                print(f"   TOR: ⚠️ Attivo ma non raggiungibile")
-            else:
-                print(f"   TOR: ❌ Non attivo")
-            if b.get('assets'):
-                print(f"   Assets: {', '.join(b.get('assets', []))}")
+            self.output(f"❌ Errore: {result.get('message', 'Sconosciuto')}")
+            self.show_status(result.get("message", "Errore"), True)
     
     def _cmd_best_gateway(self):
         """Miglior gateway - MOSTRA TUTTE LE INFO"""

@@ -8,6 +8,7 @@ ecdsa>=0.18.0
 base58>=2.1.0
 json5>=0.15.0
 coincurve==19.0.0
+PySide6>=6.6.0
 
 # Supporto SOCKS per TOR
 PySocks>=1.7.1

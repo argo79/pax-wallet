@@ -1,0 +1,466 @@
+/* ============================================================
+   PAX WALLET - iOS STYLE
+   Ispirato a iOS, colori chiari e puliti
+   ============================================================ */
+
+/* ============================================================
+   GENERALE
+   ============================================================ */
+
+QWidget {
+    background-color: #f2f2f7;
+    color: #1c1c1e;
+    font-family: -apple-system, "SF Pro Display", "Helvetica Neue", sans-serif;
+}
+
+/* ============================================================
+   SIDEBAR
+   ============================================================ */
+
+#sidebar {
+    background-color: #ffffff;
+    border-right: 1px solid #e5e5ea;
+}
+
+#logo {
+    color: #007aff;
+    font-size: 18px;
+    font-weight: 600;
+    padding: 10px 0;
+}
+
+#wallet_info {
+    background-color: #f8f9fc;
+    border: 1px solid #e5e5ea;
+    border-radius: 12px;
+    padding: 12px;
+}
+
+#wallet_name {
+    color: #1c1c1e;
+    font-size: 12px;
+    font-weight: 500;
+}
+
+#balance {
+    color: #007aff;
+    font-size: 16px;
+    font-weight: 600;
+}
+
+#nav_button {
+    background-color: transparent;
+    color: #8e8e93;
+    border: none;
+    padding: 10px 15px;
+    text-align: left;
+    font-size: 13px;
+    border-radius: 10px;
+    font-weight: 500;
+}
+
+#nav_button:hover {
+    background-color: #f2f2f7;
+    color: #007aff;
+}
+
+#nav_button:checked {
+    background-color: #007aff;
+    color: #ffffff;
+    font-weight: 600;
+}
+
+#version {
+    color: #8e8e93;
+    font-size: 10px;
+}
+
+/* ============================================================
+   CONTENUTO PRINCIPALE
+   ============================================================ */
+
+#content_stack {
+    background-color: #f2f2f7;
+}
+
+.view_title {
+    color: #1c1c1e;
+    font-size: 24px;
+    font-weight: 700;
+}
+
+#welcome_label {
+    color: #8e8e93;
+    font-size: 14px;
+    padding: 8px 0;
+    border-bottom: 1px solid #e5e5ea;
+    margin-bottom: 10px;
+}
+
+/* ============================================================
+   UNLOCK WINDOW
+   ============================================================ */
+
+#unlock_logo {
+    color: #007aff;
+    font-size: 36px;
+    font-weight: 700;
+}
+
+#unlock_desc {
+    color: #8e8e93;
+    font-size: 14px;
+}
+
+#error {
+    color: #ff3b30;
+    font-size: 13px;
+}
+
+/* ============================================================
+   BALANCE CARD
+   ============================================================ */
+
+#balance_card {
+    background-color: #ffffff;
+    border: 1px solid #e5e5ea;
+    border-radius: 16px;
+    padding: 30px;
+}
+
+#big_balance {
+    color: #1c1c1e;
+    font-size: 34px;
+    font-weight: 700;
+}
+
+#usd_balance {
+    color: #8e8e93;
+    font-size: 16px;
+}
+
+/* ============================================================
+   LISTE - STORICO, WALLET, RETICULUM OUTPUT
+   ============================================================ */
+
+#tx_list, #wallet_list, #output_list {
+    background-color: #ffffff;
+    border: 1px solid #e5e5ea;
+    border-radius: 12px;
+    color: #1c1c1e;
+    padding: 5px;
+    font-family: "SF Pro Display", -apple-system, sans-serif;
+    font-size: 12px;
+}
+
+#tx_list::item, #wallet_list::item, #output_list::item {
+    padding: 6px 12px;
+    border-radius: 6px;
+}
+
+#tx_list::item:hover, #wallet_list::item:hover, #output_list::item:hover {
+    background-color: #f2f2f7;
+}
+
+#tx_list::item:selected, #wallet_list::item:selected, #output_list::item:selected {
+    background-color: #007aff;
+    color: #ffffff;
+}
+
+/* ============================================================
+   DETAIL PANEL (per ListViewWithDetail)
+   ============================================================ */
+
+#detail_panel {
+    background-color: #ffffff;
+    border: 1px solid #e5e5ea;
+    border-radius: 14px;
+    padding: 12px;
+}
+
+#detail_title {
+    color: #007aff;
+    font-weight: 600;
+    font-size: 13px;
+}
+
+#detail_text {
+    background-color: #fafafc;
+    color: #1c1c1e;
+    border: 1px solid #e5e5ea;
+    border-radius: 10px;
+    padding: 10px;
+    font-family: "SF Pro Display", -apple-system, sans-serif;
+    font-size: 12px;
+}
+
+/* ============================================================
+   BOTTONI
+   ============================================================ */
+
+QPushButton {
+    background-color: #007aff;
+    color: #ffffff;
+    border: none;
+    border-radius: 10px;
+    padding: 10px 20px;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+QPushButton:hover {
+    background-color: #0066d9;
+}
+
+QPushButton:pressed {
+    background-color: #0055b3;
+}
+
+QPushButton:disabled {
+    background-color: #b3b3b3;
+    color: #8e8e93;
+}
+
+#quick_action {
+    background-color: #ffffff;
+    color: #007aff;
+    border: 1px solid #e5e5ea;
+    border-radius: 12px;
+    padding: 15px;
+    font-size: 14px;
+    font-weight: 500;
+}
+
+#quick_action:hover {
+    background-color: #f2f2f7;
+    border-color: #007aff;
+}
+
+#send_btn {
+    background-color: #007aff;
+    color: #ffffff;
+    font-weight: 600;
+    padding: 14px;
+    border: none;
+    border-radius: 12px;
+    font-size: 16px;
+}
+
+#send_btn:hover {
+    background-color: #0066d9;
+}
+
+#send_btn:disabled {
+    background-color: #b3b3b3;
+    color: #8e8e93;
+}
+
+#exit_btn {
+    background-color: #ffffff;
+    color: #ff3b30;
+    border: 1px solid #ff3b30;
+    border-radius: 10px;
+    padding: 8px 16px;
+    font-size: 13px;
+    font-weight: 500;
+}
+
+#exit_btn:hover {
+    background-color: #ff3b30;
+    color: #ffffff;
+}
+
+#exit_btn:pressed {
+    background-color: #d32f2f;
+    border-color: #d32f2f;
+}
+
+/* ============================================================
+   INPUT
+   ============================================================ */
+
+QLineEdit {
+    background-color: #ffffff;
+    color: #1c1c1e;
+    border: 1px solid #e5e5ea;
+    border-radius: 10px;
+    padding: 10px 14px;
+    font-size: 14px;
+}
+
+QLineEdit:focus {
+    border-color: #007aff;
+    background-color: #ffffff;
+}
+
+QLineEdit::placeholder {
+    color: #b3b3b3;
+}
+
+/* ============================================================
+   GROUP BOX
+   ============================================================ */
+
+QGroupBox {
+    border: 1px solid #e5e5ea;
+    border-radius: 12px;
+    margin-top: 10px;
+    padding-top: 10px;
+    font-weight: 600;
+    color: #1c1c1e;
+}
+
+QGroupBox::title {
+    subcontrol-origin: margin;
+    left: 10px;
+    padding: 0 5px;
+    color: #007aff;
+}
+
+/* ============================================================
+   LABEL
+   ============================================================ */
+
+QLabel {
+    color: #1c1c1e;
+    font-family: "SF Pro Display", -apple-system, sans-serif;
+}
+
+.section_title {
+    color: #1c1c1e;
+    font-size: 16px;
+    font-weight: 600;
+    margin-top: 10px;
+}
+
+#status {
+    color: #1c1c1e;
+    font-size: 13px;
+}
+
+/* ============================================================
+   SPIN BOX
+   ============================================================ */
+
+QSpinBox {
+    background-color: #ffffff;
+    color: #1c1c1e;
+    border: 1px solid #e5e5ea;
+    border-radius: 10px;
+    padding: 5px 10px;
+    font-family: "SF Pro Display", -apple-system, sans-serif;
+}
+
+QSpinBox:focus {
+    border-color: #007aff;
+}
+
+QSpinBox::up-button, QSpinBox::down-button {
+    background-color: #ffffff;
+    border: 1px solid #e5e5ea;
+    border-radius: 6px;
+}
+
+QSpinBox::up-button:hover, QSpinBox::down-button:hover {
+    background-color: #f2f2f7;
+}
+
+/* ============================================================
+   RADIO BUTTON
+   ============================================================ */
+
+QRadioButton {
+    color: #1c1c1e;
+    font-family: "SF Pro Display", -apple-system, sans-serif;
+}
+
+QRadioButton::indicator {
+    width: 18px;
+    height: 18px;
+    border: 2px solid #8e8e93;
+    border-radius: 9px;
+    background-color: #ffffff;
+}
+
+QRadioButton::indicator:checked {
+    background-color: #007aff;
+    border-color: #007aff;
+}
+
+/* ============================================================
+   SCROLL BAR
+   ============================================================ */
+
+QScrollBar:vertical {
+    background-color: #f2f2f7;
+    width: 8px;
+    border-radius: 4px;
+}
+
+QScrollBar::handle:vertical {
+    background-color: #c7c7cc;
+    border-radius: 4px;
+    min-height: 20px;
+}
+
+QScrollBar::handle:vertical:hover {
+    background-color: #b3b3b3;
+}
+
+QScrollBar:horizontal {
+    background-color: #f2f2f7;
+    height: 8px;
+    border-radius: 4px;
+}
+
+QScrollBar::handle:horizontal {
+    background-color: #c7c7cc;
+    border-radius: 4px;
+    min-width: 20px;
+}
+
+/* ============================================================
+   MESSAGE BOX
+   ============================================================ */
+
+QMessageBox {
+    background-color: #ffffff;
+    color: #1c1c1e;
+}
+
+QMessageBox QPushButton {
+    background-color: #007aff;
+    color: #ffffff;
+    border: none;
+    border-radius: 10px;
+    padding: 8px 16px;
+    font-weight: 600;
+    font-family: "SF Pro Display", -apple-system, sans-serif;
+}
+
+QMessageBox QPushButton:hover {
+    background-color: #0066d9;
+}
+
+QMessageBox QLabel {
+    color: #1c1c1e;
+    font-family: "SF Pro Display", -apple-system, sans-serif;
+}
+
+/* ============================================================
+   SPLITTER
+   ============================================================ */
+
+QSplitter::handle {
+    background-color: #e5e5ea;
+    width: 2px;
+}
+
+/* ============================================================
+   SCROLL AREA
+   ============================================================ */
+
+QScrollArea {
+    background-color: transparent;
+    border: none;
+}

@@ -45,13 +45,10 @@ def print_bold(msg): print(f"{Colors.BOLD}{msg}{Colors.RESET}")
 # ============================================================
 
 def format_time_ago(timestamp: int) -> str:
-    """Formatta il timestamp in 'X minuti fa', 'X ore fa', ecc."""
     if not timestamp:
         return "Mai"
-    
     now = int(time.time())
     diff = now - timestamp
-    
     if diff < 60:
         return "Poco fa"
     elif diff < 3600:
@@ -68,7 +65,6 @@ def format_time_ago(timestamp: int) -> str:
         return f"{weeks} sett fa" if weeks > 1 else "1 sett fa"
 
 def parse_tx_date(tx: Dict, tx_data: Dict) -> str:
-    """Parsea la data da una transazione XRP."""
     date_str = ""
     try:
         if "date" in tx:
@@ -78,7 +74,6 @@ def parse_tx_date(tx: Dict, tx_data: Dict) -> str:
                 date_str = date_obj.strftime("%Y-%m-%d %H:%M:%S")
     except:
         pass
-    
     if not date_str and "close_time_iso" in tx_data:
         try:
             close_time = tx_data.get("close_time_iso", "")
@@ -86,7 +81,6 @@ def parse_tx_date(tx: Dict, tx_data: Dict) -> str:
                 date_str = close_time.replace("T", " ").replace("Z", "")[:19]
         except:
             pass
-    
     return date_str
 
 # ============================================================
@@ -426,7 +420,10 @@ class WalletBackend:
         return None
 
     def _send_reticulum_request(self, gateway_id: str, request: Dict, timeout: int = 60) -> Optional[Dict]:
-        """Invia una richiesta RPC a un gateway e attende risposta (supporta Resource)"""
+        """
+        Invia una richiesta RPC a un gateway e attende risposta.
+        SENZA COMPRESSIONE - accetta solo JSON normale.
+        """
         if not self.reticulum:
             print_red("❌ Reticulum non disponibile")
             return None
@@ -451,8 +448,6 @@ class WalletBackend:
             )
             
             link = Link(server_destination)
-            
-            # 🔥 IMPOSTA LA STRATEGIA PER ACCETTARE RESOURCE
             link.set_resource_strategy(RNS.Link.ACCEPT_ALL)
             
             # 🔥 VARIABILI PER IL RESOURCE
@@ -481,10 +476,8 @@ class WalletBackend:
             link.set_resource_concluded_callback(on_resource_concluded)
             
             link_established = threading.Event()
-            
             def on_link_established(link_obj):
                 link_established.set()
-            
             link.set_link_established_callback(on_link_established)
             
             if not link_established.wait(10):
@@ -505,8 +498,8 @@ class WalletBackend:
                         response_received.set()
                     else:
                         print(f"📥 Pacchetto ricevuto: {data.get('type', 'unknown')}")
-                except:
-                    print("📥 Pacchetto non JSON")
+                except Exception as e:
+                    print(f"⚠️ Errore parsing pacchetto: {e}")
             
             link.set_packet_callback(on_packet_received)
             
@@ -521,19 +514,16 @@ class WalletBackend:
                     with tempfile.NamedTemporaryFile(mode='wb', suffix='.json', delete=False) as tmp:
                         tmp.write(request_bytes)
                         tmp_path = tmp.name
-                    
                     file_obj = open(tmp_path, 'rb')
                     resource = Resource(file_obj, link, is_response=False)
                     resource.data_size = len(request_bytes)
                     print(f"📤 Resource inviato ({len(request_bytes)} bytes)")
-                    time.sleep(0.5)  # Dai tempo per l'invio
+                    time.sleep(0.5)
                 except Exception as e:
                     print(f"⚠️ Errore invio Resource: {e}")
-                    # Fallback: pacchetto normale
                     Packet(link, request_bytes).send()
                     print_blue(f"📤 Richiesta inviata a {gateway_id[:16]}... (pacchetto, {len(request_bytes)} bytes)")
             else:
-                # 🔥 PACCHETTO PICCOLO
                 Packet(link, request_bytes).send()
                 print_blue(f"📤 Richiesta inviata a {gateway_id[:16]}... ({len(request_bytes)} bytes)")
             
@@ -571,7 +561,6 @@ class WalletBackend:
             print_red(f"❌ Errore richiesta Reticulum: {e}")
             return None
 
-
     def get_balance(self, refresh: bool = True) -> Dict[str, Any]:
         """Ottiene il saldo - usa internet o reticulum in base al config"""
         if not self.wallet or not self.wallet._xrp_manager:
@@ -605,69 +594,6 @@ class WalletBackend:
             return {"success": True, "balance": balance, "crypto": "XRP", "message": "OK"}
         except Exception as e:
             return {"success": False, "balance": 0.0, "crypto": "XRP", "message": str(e)}
-
-    def get_history(self, limit: int = 10) -> Dict[str, Any]:
-        """Ottiene lo storico transazioni - usa internet o reticulum in base al config"""
-        if not self.wallet or not self.wallet._xrp_manager:
-            return {"success": False, "transactions": [], "count": 0, "message": "No wallet"}
-        
-        self._ensure_correct_network()
-        manager = self.wallet._xrp_manager
-        
-        # 🔥 SE INTERNET OFF, USA RETICULUM (CON CONTROLLO TOR)
-        if not self.use_internet:
-            # 🔥 CONTROLLO DIRETTO: SE TOR ON, VERIFICA GATEWAY TOR
-            if self.use_tor and self.metrics:
-                peers = self.metrics.get_all_peers()
-                tor_gateways = [p for p in peers if p.get('is_online') and p.get('tor_enabled') and p.get('tor_reachable')]
-                if not tor_gateways:
-                    print_red("🧅 TOR ON: NESSUN gateway con TOR disponibile!")
-                    print_yellow("   Le operazioni anonime non sono possibili.")
-                    return {"success": False, "transactions": [], "count": 0, "message": "Nessun gateway TOR disponibile"}
-            return self._get_history_reticulum(limit)
-        
-        # 🔥 ALTRIMENTI USA INTERNET (CODICE ORIGINALE INALTERATO)
-        if manager.crypto_type == "XLM" and XLM_AVAILABLE:
-            return {"success": False, "transactions": [], "count": 0, "message": "XLM history not implemented in backend"}
-        
-        address = manager.get_address()
-        network = manager.network
-        
-        try:
-            from xrpl.models.requests import AccountTx
-            from xrpl.models.response import ResponseStatus
-            from xrpl.clients import JsonRpcClient
-            
-            urls = {
-                "mainnet": "https://s1.ripple.com:51234/",
-                "testnet": "https://s.altnet.rippletest.net:51234/",
-                "devnet": "https://s.devnet.rippletest.net:51234/"
-            }
-            client = JsonRpcClient(urls.get(network, urls["testnet"]))
-            request = AccountTx(
-                account=address,
-                ledger_index_min=-1,
-                ledger_index_max=-1,
-                limit=limit,
-                forward=False
-            )
-            response = client.request(request)
-            
-            if response.status != ResponseStatus.SUCCESS:
-                return {"success": False, "transactions": [], "count": 0, "message": str(response.status)}
-            
-            transactions = response.result.get("transactions", [])
-            
-            return {
-                "success": True,
-                "transactions": transactions,
-                "count": len(transactions),
-                "address": address,
-                "network": network,
-                "message": "OK"
-            }
-        except Exception as e:
-            return {"success": False, "transactions": [], "count": 0, "message": str(e)}
 
     def _get_balance_reticulum(self) -> Dict[str, Any]:
         """Ottiene il saldo via Reticulum da un gateway"""
@@ -745,10 +671,15 @@ class WalletBackend:
         
         if response and response.get("success"):
             result = response.get("result", {})
+            transactions = result.get("transactions", [])
+            
+            # 🔥 SENZA CIFRATURA - non decifriamo nulla
+            # I memo sono in chiaro
+            
             return {
                 "success": True,
-                "transactions": result.get("transactions", []),
-                "count": result.get("count", 0),
+                "transactions": transactions,
+                "count": result.get("count", len(transactions)),
                 "address": address,
                 "network": network,
                 "message": f"Storico da gateway {gateway.get('name', 'UNKNOWN')}"
@@ -906,7 +837,6 @@ class WalletBackend:
             encrypted = encrypt_wallet(json_str, self._wallet_password)
             with open(dest, 'w') as f:
                 f.write(encrypted)
-            # 🔥 NON STAMPARE NIENTE! (lo fa già wallet_manager.py)
             return True
         except Exception as e:
             print_red(f"❌ Encryption error: {e}")
@@ -1402,33 +1332,33 @@ class WalletBackend:
 
     
     # ============================================================
-    # TRANSACTIONS
+    # TRANSACTIONS - SENZA CIFRATURA MEMO
     # ============================================================
-    
-    def send_payment(self, to_address: str, amount: float, memo: str = "") -> Dict[str, Any]:
+
+    def send_payment(self, to_address: str, amount: float, memo: str = "", 
+                     encrypt_memo: bool = True) -> Dict[str, Any]:
+        """Invia pagamento con memo in chiaro (nessuna cifratura)"""
         if not self.wallet or not self.wallet._xrp_manager:
             return {"success": False, "tx_hash": "", "message": "No wallet"}
         
-        self._ensure_correct_network()
         manager = self.wallet._xrp_manager
+        crypto = manager.crypto_type
         
-        if manager.crypto_type == "XLM" and XLM_AVAILABLE:
-            return self._send_xlm(to_address, amount, memo)
-        
-        if not self.use_internet:
-            # 🔥 CONTROLLO DIRETTO: SE TOR ON, VERIFICA GATEWAY TOR
-            if self.use_tor and self.metrics:
-                peers = self.metrics.get_all_peers()
-                tor_gateways = [p for p in peers if p.get('is_online') and p.get('tor_enabled') and p.get('tor_reachable')]
-                if not tor_gateways:
-                    print_red("🧅 TOR ON: NESSUN gateway con TOR disponibile!")
-                    return {"success": False, "tx_hash": "", "message": "Nessun gateway TOR disponibile"}
-            result = self._send_payment_reticulum(to_address, amount, memo)
-            result["via_reticulum"] = True
-            return result
-        
-        return self._send_xrp(to_address, amount, memo)
-    
+        # Ignora il flag encrypt_memo - inviamo sempre in chiaro
+        memo_to_send = memo
+
+        # 🔥 Controllo lunghezza per XRP (limite 1KB)
+        if crypto == "XRP" and memo_to_send:
+            if len(memo_to_send) > 1024:
+                print_red("❌ Memo troppo lungo (max 1024 caratteri)")
+                return {"success": False, "tx_hash": "", "message": "Memo too long"}
+
+        # Invia la transazione con il memo (in chiaro)
+        if crypto == "XLM":
+            return self._send_xlm(to_address, amount, memo_to_send)
+        else:
+            return self._send_xrp(to_address, amount, memo_to_send)
+
     def _send_xlm(self, to_address: str, amount: float, memo: str) -> Dict[str, Any]:
         args = [to_address, str(amount)]
         if memo:
@@ -1561,6 +1491,9 @@ class WalletBackend:
                 return {"success": False, "transactions": [], "count": 0, "message": str(response.status)}
             
             transactions = response.result.get("transactions", [])
+            
+            # 🔥 SENZA CIFRATURA - non decifriamo nulla
+            # I memo sono in chiaro
             
             return {
                 "success": True,
@@ -1982,65 +1915,124 @@ class WalletBackend:
         return {"success": True, "wallets": wallets, "count": len(wallets), "message": "OK"}
     
     def get_peer_metrics(self) -> Dict[str, Any]:
-        """Ottiene le metriche dei peer - USA GatewayMetrics"""
         if not self.metrics:
             return {"success": False, "peers": [], "count": 0, "message": "Metrics not available", "stats": {}}
         
-        # 🔥 PRENDE I PEER DA gateway_peers.db
         peers = self.metrics.get_all_peers()
-        
         if not peers:
             return {"success": True, "peers": [], "count": 0, "message": "No peers in DB", "stats": {}}
         
-        # 🔥 FILTRA: solo online con Internet (TOR gestito dopo)
-        filtered = [p for p in peers if p.get('is_online') and p.get('has_internet')]
-        
-        # 🔥 SE TOR ON, filtra solo TOR
+        # Filtra per TOR se attivo
         if self.use_tor:
-            filtered = [p for p in filtered if p.get('tor_enabled') and p.get('tor_reachable')]
-            if not filtered:
-                return {
-                    "success": True, 
-                    "peers": [], 
-                    "count": 0, 
-                    "message": "Nessun peer TOR + Internet disponibile", 
-                    "stats": {}
-                }
+            peers = [p for p in peers if p.get('tor_enabled') and p.get('tor_reachable')]
+            if not peers:
+                return {"success": True, "peers": [], "count": 0, "message": "Nessun peer TOR disponibile", "stats": {}}
         
-        if not filtered:
-            return {
-                "success": True, 
-                "peers": [], 
-                "count": 0, 
-                "message": "Nessun peer con Internet disponibile", 
-                "stats": {}
-            }
+        # Aggiorna nomi da announce_cache
+        gateways_result = self.discover_gateways(active_only=False)
+        gateways = gateways_result.get("gateways", [])
+        gw_map = {gw.get('gateway_id'): gw for gw in gateways if gw.get('gateway_id')}
         
-        # 🔥 ORDINA COME get_best_gateway()
-        filtered.sort(key=lambda p: (
-            p.get('hops', 999),
-            p.get('latency_ms', 99999),
-            -p.get('reputation', 0),
-            -p.get('reliability', 0)
-        ))
+        all_peers = []
+        for p in peers:
+            gw_id = p.get('gateway_id')
+            if gw_id and gw_id in gw_map:
+                gw = gw_map[gw_id]
+                p['name'] = gw.get('name', p.get('name', 'UNKNOWN'))
+                p['hops'] = gw.get('hops', p.get('hops', '?'))
+                if gw.get('last_seen', 0) > p.get('last_seen', 0):
+                    p['last_seen'] = gw.get('last_seen')
+            p['tor_enabled'] = p.get('tor_enabled', False)
+            p['tor_reachable'] = p.get('tor_reachable', False)
+            all_peers.append(p)
         
-        # 🔥 CALCOLA STATS
+        # 🔥 CALCOLO SCORE - CORRETTO
+        def calc_score(p):
+            score = 0.0
+            
+            # Affidabilità (max 30)
+            rel = p.get('reliability', 0)
+            if rel is not None and rel > 0:
+                score += rel * 30
+            
+            # Reputazione (max 15)
+            rep = p.get('reputation', 50)
+            if rep is not None:
+                score += (rep / 100) * 15
+            
+            # Latenza Reticulum (max 10)
+            latency = p.get('latency_ms')
+            if latency is not None and latency > 0:
+                if latency < 50:    score += 10
+                elif latency < 100: score += 7
+                elif latency < 200: score += 4
+                elif latency < 500: score -= 2
+                else:               score -= 5
+            
+            # Hops (max 10)
+            hops = p.get('hops')
+            if hops is not None:
+                if hops == 1:       score += 10
+                elif hops == 2:     score += 7
+                elif hops == 3:     score += 4
+                else:               score -= hops
+            
+            # Internet (max 5)
+            if p.get('has_internet', False):    score += 5
+            
+            # XRP raggiungibile (max 15)
+            if p.get('xrp_reachable', False):
+                xrp_lat = p.get('xrp_latency_ms')
+                if xrp_lat is not None and xrp_lat < 300:
+                    score += 15
+                elif xrp_lat is not None:
+                    score += 10
+                else:
+                    score += 5
+            
+            # Stellar raggiungibile (max 15)
+            if p.get('stellar_reachable', False):
+                stellar_lat = p.get('stellar_latency_ms')
+                if stellar_lat is not None and stellar_lat < 300:
+                    score += 15
+                elif stellar_lat is not None:
+                    score += 10
+                else:
+                    score += 5
+            
+            # Bonus TOR (max 10)
+            if p.get('tor_enabled', False) and p.get('tor_reachable', False):
+                score += 10
+            elif p.get('tor_enabled', False):
+                score += 3
+            
+            return max(0, min(100, score))
+        
+        # Applica score a ogni peer
+        for p in all_peers:
+            p['_score'] = calc_score(p)
+        
+        # Ordina per score
+        peers_sorted = sorted(all_peers, key=lambda x: x.get('_score', 0), reverse=True)
+        
+        # Statistiche
         stats = {
-            "total_peers": len(filtered),
-            "online_peers": len(filtered),
-            "offline_peers": 0,
-            "avg_reputation": sum(p.get('reputation', 0) for p in filtered) / len(filtered) if filtered else 0,
-            "avg_latency_ms": sum(p.get('latency_ms', 0) for p in filtered if p.get('latency_ms')) / len(filtered) if filtered else 0,
-            "tor_peers": sum(1 for p in filtered if p.get('tor_enabled') and p.get('tor_reachable')),
-            "xrp_peers": sum(1 for p in filtered if p.get('xrp_reachable')),
-            "stellar_peers": sum(1 for p in filtered if p.get('stellar_reachable')),
-            "internet_peers": len(filtered),
+            "total_peers": len(peers_sorted),
+            "online_peers": sum(1 for p in peers_sorted if p.get('is_online', False)),
+            "offline_peers": sum(1 for p in peers_sorted if not p.get('is_online', False)),
+            "avg_reputation": sum(p.get('reputation', 0) for p in peers_sorted) / len(peers_sorted) if peers_sorted else 0,
+            "avg_latency_ms": sum(p.get('latency_ms', 0) for p in peers_sorted if p.get('latency_ms')) / len(peers_sorted) if peers_sorted else 0,
+            "avg_score": sum(p.get('_score', 0) for p in peers_sorted) / len(peers_sorted) if peers_sorted else 0,
+            "tor_peers": sum(1 for p in peers_sorted if p.get('tor_enabled') and p.get('tor_reachable')),
+            "xrp_peers": sum(1 for p in peers_sorted if p.get('xrp_reachable')),
+            "stellar_peers": sum(1 for p in peers_sorted if p.get('stellar_reachable')),
+            "internet_peers": sum(1 for p in peers_sorted if p.get('has_internet')),
         }
         
         return {
             "success": True,
-            "peers": filtered,
-            "count": len(filtered),
+            "peers": peers_sorted,
+            "count": len(peers_sorted),
             "message": "OK",
             "stats": stats
         }

@@ -1099,7 +1099,7 @@ class PaxWalletCLI:
         
         print_bold(f"\n🔍 PEER ORDINATI PER PERFORMANCE ({len(peers)})")
         print("=" * 280)
-        print(f"{'#':<3} {'Nome':<22} {'Hops':<5} {'RTT':<8} {'XRP':<14} {'Stellar':<14} {'Internet':<9} {'TOR':<6} {'Ultimo visto':<15} {'ID':<36} {'Assets'}")
+        print(f"{'#':<3} {'Nome':<22} {'Score':<6} {'Rel':<6} {'Rep':<4} {'Hops':<5} {'RTT':<8} {'XRP':<14} {'Stellar':<14} {'Internet':<9} {'TOR':<6} {'Ultimo visto':<15} {'ID':<36} {'Assets'}")
         print("-" * 280)
         
         for idx, p in enumerate(peers, 1):
