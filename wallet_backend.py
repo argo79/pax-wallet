@@ -596,7 +596,6 @@ class WalletBackend:
             return {"success": False, "balance": 0.0, "crypto": "XRP", "message": str(e)}
 
     def _get_balance_reticulum(self) -> Dict[str, Any]:
-        """Ottiene il saldo via Reticulum da un gateway"""
         if not self.reticulum or not self.metrics:
             return {"success": False, "balance": 0, "message": "Reticulum non disponibile"}
         
@@ -606,6 +605,7 @@ class WalletBackend:
         
         address = self.wallet.get_address()
         crypto = self.wallet.get_crypto_type()
+        network = self.wallet._xrp_manager.network  # 🔥 PRENDI IL NETWORK
         
         request = {
             "type": "ledger_relay",
@@ -613,7 +613,8 @@ class WalletBackend:
             "operation": "get_balance",
             "payload": {
                 "address": address,
-                "crypto": crypto
+                "crypto": crypto,
+                "network": network  # 🔥 AGGIUNGI QUI!
             },
             "timestamp": int(time.time()),
             "client_gateway_id": self.reticulum.gateway_address

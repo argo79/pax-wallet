@@ -579,6 +579,7 @@ class GatewayServerHandler:
     def _handle_get_balance(self, payload: Dict) -> Dict:
         address = payload.get("address")
         crypto = payload.get("crypto", "XRP")
+        network = payload.get("network", "mainnet")  # 🔥 LEGGI NETWORK
         
         if not address:
             return {"error": "Indirizzo mancante"}
@@ -588,15 +589,28 @@ class GatewayServerHandler:
                 from xrpl.account import get_balance
                 from xrpl.clients import JsonRpcClient
                 
-                client = JsonRpcClient("https://s1.ripple.com:51234/")
+                # 🔥 USA L'URL CORRETTO PER IL NETWORK
+                urls = {
+                    "mainnet": "https://s1.ripple.com:51234/",
+                    "testnet": "https://s.altnet.rippletest.net:51234/",
+                    "devnet": "https://s.devnet.rippletest.net:51234/"
+                }
+                client = JsonRpcClient(urls.get(network, urls["mainnet"]))
+                
                 balance_drops = get_balance(address, client)
                 balance = balance_drops / 1_000_000
                 return {"balance": balance, "crypto": "XRP"}
             
             elif crypto == "XLM":
+                # 🔥 USA ORRIZON CORRETTO PER IL NETWORK
+                if network == "mainnet":
+                    horizon = "https://horizon.stellar.org"
+                else:
+                    horizon = "https://horizon-testnet.stellar.org"
+                
                 try:
                     from stellar_sdk import Server
-                    server = Server("https://horizon.stellar.org")
+                    server = Server(horizon)
                     account = server.accounts().account_id(address).call()
                     for balance_data in account.get('balances', []):
                         if balance_data['asset_type'] == 'native':
