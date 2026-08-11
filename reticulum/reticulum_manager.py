@@ -895,6 +895,15 @@ class ReticulumManager:
         self._pid = None
         self._started_at = None
         
+        # 🔥 DEREGISTRA IL DESTINATION
+        if self.gateway_dest:
+            try:
+                RNS.Transport.deregister_destination(self.gateway_dest)
+                print("✅ Destination deregistrato")
+            except Exception as e:
+                print(f"⚠️ Errore deregistrazione: {e}")
+            self.gateway_dest = None
+        
         if ReticulumManager._server_handler:
             try:
                 ReticulumManager._server_handler.stop()
@@ -919,12 +928,29 @@ class ReticulumManager:
                 print(f"⚠️ Errore fermo server precedente: {e}")
             ReticulumManager._server_handler = None
         
-        self.gateway_dest = Destination(
-            self.identity,
-            Destination.IN,
-            Destination.SINGLE,
-            "rns", "rec", "gateway"
-        )
+        # 🔥 SE IL DESTINATION ESISTE GIÀ, LO RIUTILIZZO
+        if self.gateway_dest is not None:
+            print("ℹ️ Destination già esistente, lo riutilizzo")
+        else:
+            try:
+                self.gateway_dest = Destination(
+                    self.identity,
+                    Destination.IN,
+                    Destination.SINGLE,
+                    "rns", "rec", "gateway"
+                )
+            except KeyError:
+                print("⚠️ Destination già registrato, lo recupero...")
+                # Cerca il destination esistente
+                for dest in RNS.Transport.destinations:
+                    if (hasattr(dest, 'aspect') and dest.aspect == "rns.rec.gateway" and 
+                        hasattr(dest, 'identity') and dest.identity == self.identity):
+                        self.gateway_dest = dest
+                        print("✅ Destination recuperato")
+                        break
+                if self.gateway_dest is None:
+                    raise
+        
         self.gateway_dest.set_packet_callback(self._handle_packet)
         
         if self.metrics:
@@ -935,7 +961,6 @@ class ReticulumManager:
                 gateway_id=self.gateway_address
             )
             ReticulumManager._server_handler.start()
-            
             self.metrics.set_use_tor(self.config.use_tor)
         else:
             print("⚠️ Metrics non disponibile, server /info non avviato")
