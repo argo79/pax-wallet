@@ -713,9 +713,58 @@ class GatewayServerHandler:
                     
                     data = response.json()
                     transactions = data.get('_embedded', {}).get('records', [])
+                    
+                    # 🔥 ARRICCHISCI OGNI TRANSAZIONE CON LE OPERATIONS
+                    enriched = []
+                    for tx in transactions:
+                        hash_val = tx.get('hash')
+                        if not hash_val:
+                            enriched.append(tx)
+                            continue
+                        
+                        # Prendi le operations per questa transazione
+                        ops_url = f"{horizon}/transactions/{hash_val}/operations"
+                        try:
+                            ops_response = requests.get(ops_url, timeout=5)
+                            if ops_response.status_code == 200:
+                                ops_data = ops_response.json()
+                                ops = ops_data.get('_embedded', {}).get('records', [])
+                                # Arricchisci la transazione con le operations e i campi utili
+                                enriched_tx = {
+                                    "created_at": tx.get('created_at', ''),
+                                    "type": tx.get('type', 'payment'),
+                                    "hash": tx.get('hash', ''),
+                                    "memo": tx.get('memo', ''),
+                                    "fee_charged": tx.get('fee_charged', 0),
+                                    "successful": tx.get('successful', True),
+                                    "_embedded": {"records": ops}
+                                }
+                                # Estrai from, to, amount dalla prima operation se presente
+                                if ops:
+                                    op = ops[0]
+                                    if op.get('type') == 'payment':
+                                        enriched_tx["from"] = op.get('from', '')
+                                        enriched_tx["to"] = op.get('to', '')
+                                        enriched_tx["amount"] = float(op.get('amount', 0))
+                                        enriched_tx["asset_type"] = op.get('asset_type', 'native')
+                                        if enriched_tx["asset_type"] != 'native':
+                                            enriched_tx["asset_code"] = op.get('asset_code', 'XLM')
+                                    elif op.get('type') == 'create_account':
+                                        enriched_tx["from"] = op.get('funder', '')
+                                        enriched_tx["to"] = op.get('account', '')
+                                        enriched_tx["amount"] = float(op.get('starting_balance', 0))
+                                    # altri tipi di operazioni...
+                                enriched.append(enriched_tx)
+                            else:
+                                # Se fallisce, inserisci la transazione senza operations
+                                enriched.append(tx)
+                        except Exception as e:
+                            # In caso di errore, inserisci la transazione senza operations
+                            enriched.append(tx)
+                    
                     return {
-                        "transactions": transactions,
-                        "count": len(transactions)
+                        "transactions": enriched,
+                        "count": len(enriched)
                     }
                 except ImportError:
                     return {"error": "Requests non disponibile"}

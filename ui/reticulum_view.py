@@ -3,6 +3,7 @@ Reticulum View - Gestione Reticulum con lista cliccabile e dettagli
 """
 
 import json
+import time
 from PySide6.QtWidgets import *
 from PySide6.QtCore import *
 from PySide6.QtGui import *
@@ -34,26 +35,55 @@ class ReticulumView(ListViewWithDetail):
         title.setObjectName("view_title")
         layout.addWidget(title)
 
-        status_group = QGroupBox("◈ STATO GATEWAY")
-        status_layout = QFormLayout(status_group)
+        # ============================================================
+        # STATUS GROUP - MOSTRA IP, TOR, INTERNET (SOLO LETTURA)
+        # ============================================================
+        status_group = QGroupBox("◈ STATO CONNESSIONE")
+        status_layout = QGridLayout(status_group)
         
+        # Riga 1: Nome Gateway e Stato
+        status_layout.addWidget(QLabel("GATEWAY:"), 0, 0)
         self.name_label = QLabel("N/A")
-        self.status_label = QLabel("?")
-        self.peers_label = QLabel("?")
-        self.tor_label = QLabel("?")
-        self.internet_label = QLabel("?")
+        self.name_label.setObjectName("status_value")
+        status_layout.addWidget(self.name_label, 0, 1)
         
-        status_layout.addRow("NOME:", self.name_label)
-        status_layout.addRow("STATO:", self.status_label)
-        status_layout.addRow("PEER:", self.peers_label)
-        status_layout.addRow("TOR:", self.tor_label)
-        status_layout.addRow("INTERNET:", self.internet_label)
+        status_layout.addWidget(QLabel("STATO:"), 0, 2)
+        self.status_label = QLabel("?")
+        self.status_label.setObjectName("status_value")
+        status_layout.addWidget(self.status_label, 0, 3)
+        
+        # Riga 2: IP Pubblico
+        status_layout.addWidget(QLabel("IP:"), 1, 0)
+        self.ip_label = QLabel("N/A")
+        self.ip_label.setObjectName("ip_label")
+        status_layout.addWidget(self.ip_label, 1, 1, 1, 3)
+        
+        # Riga 3: TOR e Internet
+        status_layout.addWidget(QLabel("TOR:"), 2, 0)
+        self.tor_label = QLabel("?")
+        self.tor_label.setObjectName("tor_label")
+        status_layout.addWidget(self.tor_label, 2, 1)
+        
+        status_layout.addWidget(QLabel("INTERNET:"), 2, 2)
+        self.internet_label = QLabel("?")
+        self.internet_label.setObjectName("internet_label")
+        status_layout.addWidget(self.internet_label, 2, 3)
+        
+        # Riga 4: Peers
+        status_layout.addWidget(QLabel("PEER:"), 3, 0)
+        self.peers_label = QLabel("?")
+        self.peers_label.setObjectName("status_value")
+        status_layout.addWidget(self.peers_label, 3, 1, 1, 3)
+        
         layout.addWidget(status_group)
 
+        # ============================================================
+        # BOTTONI CONTROLLI (senza toggle Internet/TOR)
+        # ============================================================
         row1 = QHBoxLayout()
-        self.start_btn = QPushButton("◈ AVVIA")
+        self.start_btn = QPushButton("◈ AVVIA GATEWAY")
         self.start_btn.clicked.connect(self.start_gateway)
-        self.stop_btn = QPushButton("◈ FERMA")
+        self.stop_btn = QPushButton("◈ FERMA GATEWAY")
         self.stop_btn.clicked.connect(self.stop_gateway)
         row1.addWidget(self.start_btn)
         row1.addWidget(self.stop_btn)
@@ -71,9 +101,9 @@ class ReticulumView(ListViewWithDetail):
         row3 = QHBoxLayout()
         self.test_btn = QPushButton("◈ TESTA TUTTI")
         self.test_btn.clicked.connect(self.test_all_gateways)
-        self.best_btn = QPushButton("◈ MIGLIOR")
+        self.best_btn = QPushButton("◈ MIGLIOR GATEWAY")
         self.best_btn.clicked.connect(self.best_gateway)
-        self.metrics_btn = QPushButton("◈ METRICHE")
+        self.metrics_btn = QPushButton("◈ PEER METRICHE")
         self.metrics_btn.clicked.connect(self.peer_metrics)
         row3.addWidget(self.test_btn)
         row3.addWidget(self.best_btn)
@@ -83,7 +113,7 @@ class ReticulumView(ListViewWithDetail):
         row4 = QHBoxLayout()
         self.request_btn = QPushButton("◈ RICHIEDI INFO")
         self.request_btn.clicked.connect(self.request_info)
-        self.remove_btn = QPushButton("◈ RIMUOVI")
+        self.remove_btn = QPushButton("◈ RIMUOVI GATEWAY")
         self.remove_btn.clicked.connect(self.remove_gateway)
         row4.addWidget(self.request_btn)
         row4.addWidget(self.remove_btn)
@@ -94,10 +124,15 @@ class ReticulumView(ListViewWithDetail):
         self.status_label2.setWordWrap(True)
         layout.addWidget(self.status_label2)
 
+    # ============================================================
+    # METODI OUTPUT
+    # ============================================================
+    
     def output(self, text):
         item = QListWidgetItem(text)
         item.setData(Qt.UserRole, None)
         self.output_list.addItem(item)
+        self.output_list.scrollToBottom()
 
     def clear_output(self):
         self.output_list.clear()
@@ -131,7 +166,6 @@ class ReticulumView(ListViewWithDetail):
         elif data.get("type") == "peer":
             peer = data.get("data")
             
-            # 🔥 FORMATTA I VALORI
             xrp_status = "✅" if peer.get('xrp_reachable') else "❌"
             stellar_status = "✅" if peer.get('stellar_reachable') else "❌"
             internet_status = "✅" if peer.get('has_internet') else "❌"
@@ -160,7 +194,6 @@ class ReticulumView(ListViewWithDetail):
             networks = peer.get('networks', [])
             networks_str = ', '.join(networks) if networks else "N/A"
             
-            # 🔥 COSTRUISCI HTML
             html = f"""
             <b>🏷️ Nome:</b> {peer.get('name', 'N/A')}<br>
             <b>🆔 Gateway ID:</b> {peer.get('gateway_id', 'N/A')}<br>
@@ -229,7 +262,6 @@ class ReticulumView(ListViewWithDetail):
         if len(assets) > 3:
             assets_str += f" +{len(assets)-3}"
         
-        # 🔥 MOSTRA TUTTI I DATI NELLA LISTA
         text = f"{name} Score:{sc} Hops:{hops} RTT:{rtt_str} XRP:{xrp} Stellar:{stellar} {internet} {tor_str} Assets:{assets_str}"
         item = QListWidgetItem(text)
         item.setData(Qt.UserRole, {"type": "peer", "data": peer})
@@ -248,21 +280,72 @@ class ReticulumView(ListViewWithDetail):
         if not self.main.backend:
             return
         try:
+            # Gateway status
             status = self.main.backend.get_gateway_status()
             if status.get("success"):
                 s = status.get("status", {})
                 self.name_label.setText(s.get("name", "N/A"))
                 self.status_label.setText("✅ ATTIVO" if s.get("is_gateway") else "❌ FERMO")
                 self.peers_label.setText(str(s.get("gateway_count", 0)))
-                self.tor_label.setText("🧅 ON" if s.get("use_tor") else "OFF")
-                self.internet_label.setText("🌐 ON" if s.get("internet_on") else "📡 OFF")
                 
+                # ============================================================
+                # IP PUBBLICO (SOLO LETTURA)
+                # ============================================================
+                use_internet = self.main.backend.use_internet
+                if use_internet:
+                    try:
+                        ip_info = self.main.backend.get_ip_status()
+                        ip = ip_info.get("ip", "N/A")
+                        if ip and ip != "N/A":
+                            self.ip_label.setText(f"🌍 {ip}")
+                            self.ip_label.setStyleSheet("color: #00ff41;")
+                        else:
+                            self.ip_label.setText("🌐 Ricerca IP...")
+                            self.ip_label.setStyleSheet("color: #ffaa00;")
+                    except:
+                        self.ip_label.setText("🌐 N/A")
+                        self.ip_label.setStyleSheet("color: #ff6b6b;")
+                else:
+                    self.ip_label.setText("📡 Reticulum Mode")
+                    self.ip_label.setStyleSheet("color: #ffaa00;")
+                
+                # ============================================================
+                # TOR STATUS (SOLO LETTURA)
+                # ============================================================
+                use_tor = self.main.backend.use_tor
+                tor_reachable = self.main.backend._test_tor() if hasattr(self.main.backend, '_test_tor') else False
+                
+                if use_tor and tor_reachable:
+                    self.tor_label.setText("🧅 ON ✅")
+                    self.tor_label.setStyleSheet("color: #00ff41;")
+                elif use_tor and not tor_reachable:
+                    self.tor_label.setText("🧅 ON ⚠️")
+                    self.tor_label.setStyleSheet("color: #ffaa00;")
+                else:
+                    self.tor_label.setText("🧅 OFF")
+                    self.tor_label.setStyleSheet("color: #ff6b6b;")
+                
+                # ============================================================
+                # INTERNET STATUS (SOLO LETTURA)
+                # ============================================================
+                if use_internet:
+                    self.internet_label.setText("🌐 ON")
+                    self.internet_label.setStyleSheet("color: #00ff41;")
+                else:
+                    self.internet_label.setText("📡 OFF (Reticulum)")
+                    self.internet_label.setStyleSheet("color: #ffaa00;")
+                
+                # Bottoni start/stop
                 if s.get("is_gateway"):
                     self.start_btn.setEnabled(False)
                     self.stop_btn.setEnabled(True)
+                    self.start_btn.setStyleSheet("")
+                    self.stop_btn.setStyleSheet("background-color: #5a1a1a;")
                 else:
                     self.start_btn.setEnabled(True)
                     self.stop_btn.setEnabled(False)
+                    self.start_btn.setStyleSheet("background-color: #1a4a1a;")
+                    self.stop_btn.setStyleSheet("")
             else:
                 self.output(f"⚠️ {status.get('message', 'Errore')}")
         except Exception as e:
@@ -393,19 +476,17 @@ class ReticulumView(ListViewWithDetail):
                 self.show_status("Nessun peer trovato")
                 return
             
-            # 🔥 MOSTRA FILTRO APPLICATO
+            # Mostra filtro applicato
             if self.main.backend.use_tor:
                 self.output("🧅 TOR ON: gateway filtrati per TOR + Internet")
             else:
                 self.output("🌐 TOR OFF: gateway filtrati per Internet")
             
-            # 🔥 INTESTAZIONE CON ASSETS
             self.output(f"✅ Trovati {len(peers)} peer")
             self.output("=" * 220)
             self.output(f"{'#':<3} {'Nome':<20} {'Score':<6} {'Rel':<6} {'Hops':<5} {'RTT':<8} {'XRP':<14} {'Stellar':<14} {'Internet':<9} {'TOR':<6} {'Assets'}")
             self.output("-" * 220)
             
-            # 🔥 AGGIUNGI I PEER CON ASSETS
             for idx, p in enumerate(peers, 1):
                 name = str(p.get('name', 'UNKNOWN'))[:16]
                 sc = round(p.get('_score', 0))
@@ -414,7 +495,6 @@ class ReticulumView(ListViewWithDetail):
                 rtt = p.get('latency_ms')
                 rtt_str = f"{rtt:.0f}ms" if rtt is not None else "?ms"
                 
-                # XRP
                 xrp_lat = p.get('xrp_latency_ms')
                 if p.get('xrp_reachable') and xrp_lat is not None:
                     xrp_str = f"✅{xrp_lat:.0f}ms"
@@ -423,7 +503,6 @@ class ReticulumView(ListViewWithDetail):
                 else:
                     xrp_str = "❌"
                 
-                # Stellar
                 stellar_lat = p.get('stellar_latency_ms')
                 if p.get('stellar_reachable') and stellar_lat is not None:
                     stellar_str = f"✅{stellar_lat:.0f}ms"
@@ -432,15 +511,12 @@ class ReticulumView(ListViewWithDetail):
                 else:
                     stellar_str = "❌"
                 
-                # Internet
                 internet = "🌐" if p.get('has_internet') else "📡"
                 
-                # TOR
                 tor_enabled = p.get('tor_enabled', False)
                 tor_reachable = p.get('tor_reachable', False)
                 tor_str = "🧅✅" if (tor_enabled and tor_reachable) else "🧅❌" if tor_enabled else "—"
                 
-                # 🔥 ASSETS (COME NELLA CLI)
                 assets = p.get('assets', [])
                 if isinstance(assets, list):
                     assets_str = ', '.join(assets[:3])
@@ -449,17 +525,14 @@ class ReticulumView(ListViewWithDetail):
                 else:
                     assets_str = str(assets)[:20]
                 
-                # 🔥 TESTO DELLA RIGA CON ASSETS
                 text = f"{idx:<3} {name:<20} {sc:<6} {rel:<6} {hops:<5} {rtt_str:<8} {xrp_str:<14} {stellar_str:<14} {internet:<9} {tor_str:<6} {assets_str}"
                 
-                # 🔥 AGGIUNGI ITEM CLICCABILE
                 item = QListWidgetItem(text)
                 item.setData(Qt.UserRole, {"type": "peer", "data": p})
                 self.output_list.addItem(item)
             
             self.output("=" * 220)
             
-            # 🔥 STATISTICHE (COME NELLA CLI)
             if stats:
                 self.output(f"\n📊 Statistiche:")
                 self.output(f"   Totale peer: {stats.get('total_peers', 0)}")
@@ -474,7 +547,6 @@ class ReticulumView(ListViewWithDetail):
                 if stats.get('avg_latency_ms', 0) > 0:
                     self.output(f"   Latenza media: {round(stats.get('avg_latency_ms'), 0)}ms")
             
-            # 🔥 MIGLIOR PEER (COME NELLA CLI)
             if peers:
                 b = peers[0]
                 self.output(f"\n🏆 MIGLIOR PEER: {b.get('name', 'UNKNOWN')}")

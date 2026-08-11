@@ -9,6 +9,7 @@ import re
 import logging
 import time
 import os
+import io
 from pathlib import Path
 from datetime import datetime
 from typing import Optional, Dict, Any, List, Union, Tuple
@@ -116,11 +117,12 @@ try:
     XLM_AVAILABLE = True
 except ImportError as e:
     XLM_AVAILABLE = False
-    def send_xlm(cli):
+    print(f"⚠️ Comandi XLM non disponibili: {e}")
+    def send_xlm(cli, args):
         print("❌ Comando XLM non disponibile. Installa stellar-sdk")
-    def history_xlm(cli):
+    def history_xlm(cli, args):
         print("❌ Comando XLM non disponibile. Installa stellar-sdk")
-    def info_xlm(cli):
+    def info_xlm(cli, args):
         print("❌ Comando XLM non disponibile. Installa stellar-sdk")
     def faucet_xlm(cli):
         print("❌ Comando XLM non disponibile. Installa stellar-sdk")
@@ -175,11 +177,11 @@ class WalletBackend:
         self.reticulum_initialized = False
         self.reticulum_config = ReticulumConfig()
         
-        # 🔥 LEGGI IL FLAG INTERNET DAL CONFIG
+        # LEGGI IL FLAG INTERNET DAL CONFIG
         self.use_internet = getattr(self.reticulum_config, 'use_internet', True)
         print_green(f"🌐 Modalità internet: {'ON' if self.use_internet else 'OFF (Reticulum)'}")
 
-        # 🔥 LEGGI IL FLAG TOR DAL CONFIG
+        # LEGGI IL FLAG TOR DAL CONFIG
         self.use_tor = getattr(self.reticulum_config, 'use_tor', False)
         self.tor_socks_port = getattr(self.reticulum_config, 'tor_socks_port', 9050)
         self.tor_timeout_seconds = getattr(self.reticulum_config, 'tor_timeout_seconds', 30)
@@ -191,7 +193,7 @@ class WalletBackend:
         
         self._update_proxy()
 
-        # 🔥 PATCH PER COMPATIBILITÀ - USA IL VALORE DAL CONFIG!
+        # PATCH PER COMPATIBILITÀ - USA IL VALORE DAL CONFIG!
         discover_since = getattr(self.reticulum_config, 'discover_since_seconds', 86400)
         
         if not hasattr(self.reticulum_config, 'gateway'):
@@ -223,7 +225,6 @@ class WalletBackend:
             
             if METRICS_AVAILABLE:
                 try:
-                    # 🔥 PASSA IL NOME DAL CONFIG A GatewayMetrics!
                     gateway_name = self.reticulum.config.gateway_name if hasattr(self.reticulum, 'config') else "Gateway"
                     self.metrics = GatewayMetrics(self.reticulum.identity, gateway_name=gateway_name)
                     self.metrics.set_my_gateway_id(self.reticulum.gateway_address)
@@ -264,7 +265,6 @@ class WalletBackend:
         """Imposta modalità internet e salva nel config"""
         self.use_internet = enabled
         
-        # Aggiorna il config annuncio_config.json
         try:
             import json
             config_path = Path("annuncio_config.json")
@@ -276,7 +276,6 @@ class WalletBackend:
                     json.dump(config, f, indent=4)
                 print_green(f"✅ Config aggiornato: internet = {'on' if enabled else 'off'}")
             else:
-                print_yellow("⚠️ File config non trovato, creazione...")
                 config = {
                     "gateway": {"internet": "on" if enabled else "off"},
                     "wallet": {},
@@ -289,11 +288,14 @@ class WalletBackend:
             print_yellow(f"⚠️ Errore salvataggio config: {e}")
             return False
         
-        # Aggiorna anche metrics se esiste
         if self.metrics:
             self.metrics.set_use_internet(enabled)
         
-        print_green(f"🌐 Internet: {'ON' if enabled else 'OFF'} (usa Reticulum)")
+        # CORREZIONE QUI - usa l'icona giusta
+        if enabled:
+            print_green("🌐 Internet: ON")
+        else:
+            print_green("📡 Internet: OFF (usa Reticulum)")
         return True
 
     def _update_proxy(self):
@@ -307,22 +309,19 @@ class WalletBackend:
             os.environ.pop('HTTP_PROXY', None)
             os.environ.pop('HTTPS_PROXY', None)
             print_green("🌐 TOR disattivato, connessione diretta")
-        self._client = None  # invalida il client
+        self._client = None
 
     def _test_tor(self) -> bool:
-        """Verifica se TOR è raggiungibile (test socket veloce)."""
         if not self.use_tor:
             return False
         try:
             import socket
-            # Prova su 127.0.0.1
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(3)
             sock.connect(('127.0.0.1', self.tor_socks_port))
             sock.close()
             return True
         except Exception:
-            # Se fallisce su 127.0.0.1, prova su localhost
             try:
                 import socket
                 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -334,10 +333,8 @@ class WalletBackend:
                 return False
 
     def set_use_tor(self, enabled: bool) -> bool:
-        """Attiva/disattiva TOR e salva la configurazione."""
         self.use_tor = enabled
         self._update_proxy()
-        # Salva nel file di configurazione
         try:
             import json
             config_path = Path("annuncio_config.json")
@@ -354,7 +351,6 @@ class WalletBackend:
             return False
 
     def _get_public_ip(self) -> str:
-        """Ottiene l'IP pubblico (normale o via TOR)."""
         try:
             import requests
             proxies = {}
@@ -373,22 +369,15 @@ class WalletBackend:
     # ============================================================
 
     def _select_best_gateway(self, asset: str = None) -> Optional[Dict]:
-        """
-        Seleziona il miglior gateway usando GatewayMetrics.
-        asset: se specificato, cerca gateway che supporta quell'asset
-        """
         if not self.metrics:
             print_red("❌ Metrics non disponibili")
             return None
         
-        # 🔥 USA GatewayMetrics.get_best_gateway() che già filtra per has_internet=1
         best = self.metrics.get_best_gateway(asset)
         
         if best:
-            # 🔥 SE TOR ON: verifica che il gateway abbia TOR
             if self.use_tor:
                 if not (best.get('tor_enabled') and best.get('tor_reachable')):
-                    # Il miglior gateway non ha TOR, cerco uno con TOR
                     peers = self.metrics.get_all_peers()
                     tor_candidates = [
                         p for p in peers 
@@ -400,7 +389,6 @@ class WalletBackend:
                     if not tor_candidates:
                         print_red("🧅 TOR ON: NESSUN gateway con TOR + Internet disponibile!")
                         return None
-                    # Ordina come get_best_gateway
                     tor_candidates.sort(key=lambda p: (
                         p.get('hops', 999),
                         p.get('latency_ms', 99999),
@@ -420,10 +408,6 @@ class WalletBackend:
         return None
 
     def _send_reticulum_request(self, gateway_id: str, request: Dict, timeout: int = 60) -> Optional[Dict]:
-        """
-        Invia una richiesta RPC a un gateway e attende risposta.
-        SENZA COMPRESSIONE - accetta solo JSON normale.
-        """
         if not self.reticulum:
             print_red("❌ Reticulum non disponibile")
             return None
@@ -450,7 +434,6 @@ class WalletBackend:
             link = Link(server_destination)
             link.set_resource_strategy(RNS.Link.ACCEPT_ALL)
             
-            # 🔥 VARIABILI PER IL RESOURCE
             resource_data = None
             resource_received = threading.Event()
             resource_error = None
@@ -485,7 +468,6 @@ class WalletBackend:
                 print_red("❌ Timeout connessione al gateway")
                 return None
             
-            # 🔥 ATTESA PACCHETTI JSON O RESOURCE
             response_data = None
             response_received = threading.Event()
             
@@ -503,11 +485,9 @@ class WalletBackend:
             
             link.set_packet_callback(on_packet_received)
             
-            # 🔥 PREPARA LA RICHIESTA
             request_json = json.dumps(request)
             request_bytes = request_json.encode()
             
-            # 🔥 SE LA RICHIESTA SUPERA L'MTU, USA RESOURCE
             if len(request_bytes) > 450:
                 print(f"📤 Richiesta grande ({len(request_bytes)} bytes), invio via Resource...")
                 try:
@@ -527,7 +507,6 @@ class WalletBackend:
                 Packet(link, request_bytes).send()
                 print_blue(f"📤 Richiesta inviata a {gateway_id[:16]}... ({len(request_bytes)} bytes)")
             
-            # 🔥 ASPETTA PACCHETTO O RESOURCE
             start_time = time.time()
             while time.time() - start_time < timeout:
                 if response_received.is_set():
@@ -536,7 +515,6 @@ class WalletBackend:
                     break
                 time.sleep(0.1)
             
-            # 🔥 SE ABBIAMO RICEVUTO UN RESOURCE
             if resource_received.is_set():
                 if resource_data and not resource_error:
                     try:
@@ -548,11 +526,9 @@ class WalletBackend:
                     print_red(f"❌ Errore resource: {resource_error}")
                     return None
             
-            # 🔥 SE ABBIAMO RICEVUTO UN PACCHETTO JSON
             if response_received.is_set() and response_data:
                 return response_data
             
-            # 🔥 TIMEOUT
             link.teardown()
             print_red(f"⏰ Timeout attesa risposta ({timeout}s)")
             return None
@@ -560,40 +536,6 @@ class WalletBackend:
         except Exception as e:
             print_red(f"❌ Errore richiesta Reticulum: {e}")
             return None
-
-    def get_balance(self, refresh: bool = True) -> Dict[str, Any]:
-        """Ottiene il saldo - usa internet o reticulum in base al config"""
-        if not self.wallet or not self.wallet._xrp_manager:
-            return {"success": False, "balance": 0.0, "crypto": "XRP", "message": "No wallet"}
-        
-        self._ensure_correct_network()
-        manager = self.wallet._xrp_manager
-        
-        # 🔥 SE INTERNET OFF, USA RETICULUM (CON CONTROLLO TOR)
-        if not self.use_internet:
-            # 🔥 CONTROLLO DIRETTO: SE TOR ON, VERIFICA GATEWAY TOR
-            if self.use_tor and self.metrics:
-                peers = self.metrics.get_all_peers()
-                tor_gateways = [p for p in peers if p.get('is_online') and p.get('tor_enabled') and p.get('tor_reachable')]
-                if not tor_gateways:
-                    print_red("🧅 TOR ON: NESSUN gateway con TOR disponibile!")
-                    print_yellow("   Le operazioni anonime non sono possibili.")
-                    return {"success": False, "balance": 0.0, "crypto": "XRP", "message": "Nessun gateway TOR disponibile"}
-            return self._get_balance_reticulum()
-        
-        # 🔥 ALTRIMENTI USA INTERNET
-        if manager.crypto_type == "XLM" and XLM_AVAILABLE:
-            try:
-                balance = manager.get_balance(refresh)
-                return {"success": True, "balance": balance, "crypto": "XLM", "message": "OK"}
-            except Exception as e:
-                return {"success": False, "balance": 0.0, "crypto": "XLM", "message": str(e)}
-        
-        try:
-            balance = manager.get_balance(refresh)
-            return {"success": True, "balance": balance, "crypto": "XRP", "message": "OK"}
-        except Exception as e:
-            return {"success": False, "balance": 0.0, "crypto": "XRP", "message": str(e)}
 
     def _get_balance_reticulum(self) -> Dict[str, Any]:
         if not self.reticulum or not self.metrics:
@@ -605,7 +547,7 @@ class WalletBackend:
         
         address = self.wallet.get_address()
         crypto = self.wallet.get_crypto_type()
-        network = self.wallet._xrp_manager.network  # 🔥 PRENDI IL NETWORK
+        network = self.wallet._xrp_manager.network
         
         request = {
             "type": "ledger_relay",
@@ -614,7 +556,7 @@ class WalletBackend:
             "payload": {
                 "address": address,
                 "crypto": crypto,
-                "network": network  # 🔥 AGGIUNGI QUI!
+                "network": network
             },
             "timestamp": int(time.time()),
             "client_gateway_id": self.reticulum.gateway_address
@@ -674,15 +616,60 @@ class WalletBackend:
             result = response.get("result", {})
             transactions = result.get("transactions", [])
             
-            # 🔥 SENZA CIFRATURA - non decifriamo nulla
-            # I memo sono in chiaro
+            normalized = []
+            for tx in transactions:
+                # 🔥 SE HA TX_JSON, USA QUELLO (FORMATO XRP CORRETTO)
+                if "tx_json" in tx:
+                    normalized.append(tx)
+                    continue
+                
+                # Se ha _embedded.records (XLM), usalo
+                if tx.get('_embedded', {}).get('records'):
+                    normalized.append(tx)
+                    continue
+                
+                # Per XLM - formato Horizon (senza _embedded)
+                if crypto == "XLM":
+                    # Prendi SOLO i campi che esistono
+                    tx_data = {
+                        "created_at": tx.get('created_at', ''),
+                        "type": tx.get('type', ''),
+                        "hash": tx.get('hash', ''),
+                        "memo": tx.get('memo', ''),
+                        "fee_charged": tx.get('fee_charged', 0),
+                        "successful": tx.get('successful', True),
+                        "_embedded": {
+                            "records": [
+                                {
+                                    "type": "payment",
+                                    "amount": str(tx.get('amount', '')) if 'amount' in tx else '',
+                                    "asset_type": tx.get('asset_type', '') if 'asset_type' in tx else '',
+                                    "asset_code": tx.get('asset_code', '') if 'asset_code' in tx else '',
+                                    "from": tx.get('from', '') if 'from' in tx else '',
+                                    "to": tx.get('to', '') if 'to' in tx else ''
+                                }
+                            ]
+                        }
+                    }
+                    normalized.append(tx_data)
+                else:
+                    # Per XRP - NON creare tx_json artificiale
+                    # Se la transazione è già nel formato AccountTx (con tx_json a livello root)
+                    # la usiamo così com'è
+                    if "hash" in tx or "close_time_iso" in tx:
+                        # È già una transazione XRP, la passiamo come è
+                        normalized.append(tx)
+                    else:
+                        # Ultimo tentativo: usa i campi esistenti
+                        normalized.append(tx)
             
             return {
                 "success": True,
-                "transactions": transactions,
-                "count": result.get("count", len(transactions)),
+                "transactions": normalized,
+                "count": result.get("count", len(normalized)),
                 "address": address,
                 "network": network,
+                "crypto": crypto,
                 "message": f"Storico da gateway {gateway.get('name', 'UNKNOWN')}"
             }
         
@@ -922,7 +909,6 @@ class WalletBackend:
             return False
     
     def _invalidate_cache(self):
-        """Invalida la cache quando i dati cambiano"""
         self._cached_wallet_list = None
         self._cached_wallet_list_time = 0
     
@@ -988,10 +974,8 @@ class WalletBackend:
     # ============================================================
     
     def init(self, network: str = None):
-        """Inizializza il wallet"""
         active = self._get_active_wallet_name()
         
-        # Default
         final_network = "testnet"
         final_crypto = "XRP"
         
@@ -1013,7 +997,6 @@ class WalletBackend:
                     with open(wallet_file) as f:
                         content = f.read().strip()
                     
-                    # 🔥 DECIFRA IL FILE
                     data = self._decrypt_data(content)
                     if data:
                         final_network = data.get("network", "testnet")
@@ -1033,7 +1016,6 @@ class WalletBackend:
             final_network = network if network else "testnet"
             final_crypto = "XRP"
         
-        # 🔥 CREA IL WALLET PASSANDO LA PASSWORD
         self.wallet = create_wallet(
             self.data_file,
             crypto=final_crypto,
@@ -1041,7 +1023,6 @@ class WalletBackend:
             password=self._wallet_password
         )
         
-        # 🔥 CARICA IL WALLET ATTIVO NEL MANAGER (dopo che è stato inizializzato)
         if active and self.wallet and self.wallet._xrp_manager:
             manager = self.wallet._xrp_manager
             wallet_file = self.wallets_dir / f"{active}.json"
@@ -1079,11 +1060,9 @@ class WalletBackend:
                 except Exception as e:
                     print_yellow(f"⚠️ Errore caricamento wallet '{active}': {e}")
         
-        # 🔥 PRENDI IL CORE DAL MANAGER
         if self.wallet and self.wallet._xrp_manager and hasattr(self.wallet._xrp_manager, 'core'):
             self.wallet.core = self.wallet._xrp_manager.core
         
-        # 🔥 USA IL NETWORK FINALE
         final_network = self.wallet._xrp_manager.network if self.wallet and self.wallet._xrp_manager else final_network
         final_crypto = self.wallet._xrp_manager.crypto_type if self.wallet and self.wallet._xrp_manager else final_crypto
         
@@ -1096,7 +1075,6 @@ class WalletBackend:
     
     def create_wallet(self, name: str = "default", crypto: str = "XRP", network: str = "testnet", 
                       strength: int = 256, passphrase: str = "") -> Dict[str, Any]:
-        """Crea un nuovo wallet con strength e passphrase opzionali"""
         if not self.wallet:
             self.init(network)
         if not self._validate_wallet_name(name):
@@ -1116,7 +1094,6 @@ class WalletBackend:
         
         result = self.wallet.create_wallet(name, crypto, strength=strength, passphrase=passphrase)
         
-        # 🔥 SALVA SOLO UNA VOLTA!
         self.wallet.save()
         self._save_wallet_as(name)
         self._set_active_wallet_name(name)
@@ -1134,7 +1111,6 @@ class WalletBackend:
     
     def import_wallet(self, seed_input: str, name: str = "imported", crypto: str = "auto", 
                       network: str = "testnet", passphrase: str = "") -> Dict[str, Any]:
-        """Importa un wallet con supporto per passphrase"""
         if not self.wallet:
             self.init(network)
         if not self._validate_wallet_name(name):
@@ -1155,27 +1131,19 @@ class WalletBackend:
             cleaned = re.sub(r'\s+', ' ', cleaned).strip()
             numbers_parts = cleaned.split()
             
-            import_type = manager.detect_input_type(seed_input)
             crypto_param = None
             if crypto and crypto.lower() != "auto":
                 crypto_param = crypto.upper()
                 if crypto_param not in ["XRP", "XLM"]:
                     return {"success": False, "error": f"Crypto non supportata: {crypto_param}"}
             
-            # USA LA PASSPHRASE PASSATA
             if len(numbers_parts) == 8 and all(p.isdigit() and len(p) == 6 for p in numbers_parts):
                 result = self.wallet.import_wallet(" ".join(numbers_parts), name, crypto_param)
             else:
                 result = self.wallet.import_wallet(seed_input, name, crypto_param, passphrase=passphrase)
             
-            # 🔥 SALVA SOLO UNA VOLTA! (xrp_data.json + wallets/{name}.json)
-            # self.wallet.save() SALVA GIÀ xrp_data.json
             self.wallet.save()
-            
-            # 🔥 SALVA IN wallets/{name}.json (COPIA DI BACKUP)
             self._save_wallet_as(name)
-            
-            # 🔥 SETTA COME ATTIVO
             self._set_active_wallet_name(name)
             self._invalidate_cache()
             
@@ -1192,7 +1160,6 @@ class WalletBackend:
     def switch_wallet(self, name: str) -> Dict[str, Any]:
         if self._switch_wallet(name):
             self._invalidate_cache()
-            # 🔥 Restituisci anche network e crypto
             active = self.get_active_wallet()
             return {
                 "success": True, 
@@ -1229,15 +1196,11 @@ class WalletBackend:
             return {"success": True, "message": f"Wallet '{name}' removed"}
         return {"success": False, "message": f"Wallet '{name}' not found"}
     
-    # ============================================================
-    # WALLET MANAGEMENT - PUBBLICHE
-    # ============================================================
-
     def get_wallet_info(self) -> Dict[str, Any]:
-        """Info del wallet attivo (senza parametri)."""
         manager = self.wallet._xrp_manager if self.wallet else None
         if not manager or not manager.is_loaded():
             return {"success": False, "message": "No wallet loaded"}
+        
         info = manager.get_seed_info()
         return {
             "success": True,
@@ -1256,7 +1219,6 @@ class WalletBackend:
         }
 
     def derive_addresses(self, keyword: str = "default", count: int = 5) -> Dict[str, Any]:
-        """Deriva count indirizzi usando il manager."""
         if not self.wallet or not self.wallet._xrp_manager:
             return {"success": False, "addresses": [], "message": "No wallet"}
         
@@ -1272,7 +1234,6 @@ class WalletBackend:
                 return {"success": False, "addresses": [], "message": str(e)}
         
         try:
-            # 🔥 CHIAMA IL MANAGER CHE DERIVA CORRETTAMENTE
             wallet_infos = manager.derive_addresses(keyword, count)
             addresses = []
             for info in wallet_infos:
@@ -1294,7 +1255,6 @@ class WalletBackend:
             return {"success": True, "address": address, "message": "OK"}
         return {"success": False, "address": "", "message": "No address"}
     
-    
     def export_wallet(self, include_private: bool = False) -> Dict[str, Any]:
         if not self.wallet or not self.wallet._xrp_manager:
             return {"success": False, "data": {}, "message": "No wallet"}
@@ -1306,71 +1266,115 @@ class WalletBackend:
     # ============================================================
     
     def get_balance(self, refresh: bool = True) -> Dict[str, Any]:
-        """Ottiene il saldo - usa internet o reticulum in base al config"""
         if not self.wallet or not self.wallet._xrp_manager:
             return {"success": False, "balance": 0.0, "crypto": "XRP", "message": "No wallet"}
         
         self._ensure_correct_network()
         manager = self.wallet._xrp_manager
         
-        # 🔥 SE INTERNET OFF, USA RETICULUM
         if not self.use_internet:
             return self._get_balance_reticulum()
         
-        # 🔥 ALTRIMENTI USA INTERNET
-        if manager.crypto_type == "XLM" and XLM_AVAILABLE:
-            try:
-                balance = manager.get_balance(refresh)
-                return {"success": True, "balance": balance, "crypto": "XLM", "message": "OK"}
-            except Exception as e:
-                return {"success": False, "balance": 0.0, "crypto": "XLM", "message": str(e)}
-        
         try:
             balance = manager.get_balance(refresh)
-            return {"success": True, "balance": balance, "crypto": "XRP", "message": "OK"}
+            return {"success": True, "balance": balance, "crypto": manager.crypto_type, "message": "OK"}
         except Exception as e:
-            return {"success": False, "balance": 0.0, "crypto": "XRP", "message": str(e)}
+            return {"success": False, "balance": 0.0, "crypto": manager.crypto_type, "message": str(e)}
 
-    
     # ============================================================
-    # TRANSACTIONS - SENZA CIFRATURA MEMO
+    # TRANSACTIONS - USA I COMANDI XLM
     # ============================================================
+
+    def _run_xlm_command(self, command_func, args=None):
+        """Esegue un comando XLM e cattura l'output"""
+        if not XLM_AVAILABLE:
+            return False, "Comando XLM non disponibile", ""
+        
+        manager = self.wallet._xrp_manager
+        
+        # Crea wrapper per il comando
+        class CliWrapper:
+            def __init__(self, manager_instance, backend_instance):
+                self.wallet = type('obj', (object,), {'_xrp_manager': manager_instance})()
+                self.manager = manager_instance
+                self.backend = backend_instance
+            
+            def _get_active_wallet_name(self):
+                if hasattr(self.backend, '_get_active_wallet_name'):
+                    return self.backend._get_active_wallet_name()
+                return "default"
+        
+        wrapper = CliWrapper(manager, self)
+        
+        old_stdout = sys.stdout
+        sys.stdout = io.StringIO()
+        try:
+            if args:
+                command_func(wrapper, args)
+            else:
+                command_func(wrapper)
+            output = sys.stdout.getvalue()
+            
+            # Determina successo
+            success = "✅" in output and "❌" not in output
+            
+            # Estrai hash
+            tx_hash = ""
+            if success:
+                import re
+                match = re.search(r'Hash:\s*([a-fA-F0-9]+)', output)
+                if match:
+                    tx_hash = match.group(1)
+                else:
+                    match = re.search(r'hash["\']?\s*[:=]\s*["\']?([a-fA-F0-9]+)', output, re.IGNORECASE)
+                    if match:
+                        tx_hash = match.group(1)
+            
+            return success, output, tx_hash
+        except Exception as e:
+            return False, str(e), ""
+        finally:
+            sys.stdout = old_stdout
 
     def send_payment(self, to_address: str, amount: float, memo: str = "", 
                      encrypt_memo: bool = True) -> Dict[str, Any]:
-        """Invia pagamento con memo in chiaro (nessuna cifratura)"""
+        """Invia pagamento - XRP usa manager diretto, XLM usa comando xlm_commands"""
         if not self.wallet or not self.wallet._xrp_manager:
             return {"success": False, "tx_hash": "", "message": "No wallet"}
         
         manager = self.wallet._xrp_manager
         crypto = manager.crypto_type
         
-        # Ignora il flag encrypt_memo - inviamo sempre in chiaro
         memo_to_send = memo
-
-        # 🔥 Controllo lunghezza per XRP (limite 1KB)
-        if crypto == "XRP" and memo_to_send:
-            if len(memo_to_send) > 1024:
-                print_red("❌ Memo troppo lungo (max 1024 caratteri)")
-                return {"success": False, "tx_hash": "", "message": "Memo too long"}
-
-        # Invia la transazione con il memo (in chiaro)
+        if memo_to_send and len(memo_to_send) > 1024:
+            return {"success": False, "tx_hash": "", "message": "Memo too long (max 1024 chars)"}
+        
+        # XLM - usa il comando send_xlm (che funziona)
         if crypto == "XLM":
-            return self._send_xlm(to_address, amount, memo_to_send)
+            args = [to_address, str(amount)]
+            if memo_to_send:
+                args.append(memo_to_send)
+            success, output, tx_hash = self._run_xlm_command(send_xlm, args)
+            
+            if success:
+                return {"success": True, "tx_hash": tx_hash, "message": "XLM sent"}
+            else:
+                # Estrai messaggio di errore
+                error_msg = output.strip()
+                if "op_no_destination" in error_msg:
+                    error_msg = "Indirizzo destinazione non valido. Verifica che l'indirizzo XLM sia corretto."
+                elif "insufficient" in error_msg.lower():
+                    error_msg = "Saldo insufficiente. Verifica il tuo saldo XLM."
+                elif "Timeout" in error_msg:
+                    error_msg = "Timeout nella connessione a Horizon. Riprova."
+                return {"success": False, "tx_hash": "", "message": error_msg}
+        
+        # XRP - usa manager diretto
         else:
             return self._send_xrp(to_address, amount, memo_to_send)
 
-    def _send_xlm(self, to_address: str, amount: float, memo: str) -> Dict[str, Any]:
-        args = [to_address, str(amount)]
-        if memo:
-            args.append(memo)
-        send_xlm(self, args)
-        return {"success": True, "tx_hash": "sent", "message": "XLM sent"}
-    
     def _send_xrp(self, to_address: str, amount: float, memo: str) -> Dict[str, Any]:
-        """
-        Invia pagamento XRP - ADATTIVO PER TIPO DI WALLET
-        """
+        """Invia pagamento XRP - DIRETTO"""
         from xrpl.account import get_balance
         from xrpl.models.transactions import Payment
         from xrpl.transaction import autofill, sign, submit_and_wait
@@ -1382,10 +1386,8 @@ class WalletBackend:
         manager = self.wallet._xrp_manager
         seed_type = manager.seed_type
 
-        # 🔥 1. OTTIENI IL WALLET IN BASE AL TIPO
         try:
             if seed_type in ["bip39", "private_key"]:
-                # 🔥 USA LA PRIVATE KEY DIRETTAMENTE (SECP256K1)
                 private_key_hex = manager.base_private.hex() if manager.base_private else None
                 if not private_key_hex:
                     return {"success": False, "tx_hash": "", "message": "Nessuna private key disponibile"}
@@ -1396,14 +1398,9 @@ class WalletBackend:
                     private_key=private_key_hex,
                     algorithm=CryptoAlgorithm.SECP256K1
                 )
-                print_green(f"✅ Wallet SECP256K1 (da {'mnemonic' if seed_type == 'bip39' else 'private key'}): {wallet.classic_address}")
-
             else:
-                # 🔥 PER NUMBERS, XRP_SEED, STELLAR_SEED USA IL SEED
                 wallet = manager.get_wallet()
-                print_green(f"✅ Wallet caricato da seed: {wallet.classic_address}")
 
-            # 2. CONNESSIONE AL NETWORK
             urls = {
                 "mainnet": "https://s1.ripple.com:51234/",
                 "testnet": "https://s.altnet.rippletest.net:51234/",
@@ -1412,14 +1409,12 @@ class WalletBackend:
             client = JsonRpcClient(urls.get(manager.network, urls["testnet"]))
             source_address = wallet.classic_address
 
-            # 3. VERIFICA SALDO
             balance_drops = get_balance(source_address, client)
             balance_xrp = int(balance_drops) / 1_000_000 if isinstance(balance_drops, str) else balance_drops / 1_000_000
 
             if balance_xrp < amount:
                 return {"success": False, "tx_hash": "", "message": f"Saldo insufficiente: {balance_xrp:.6f} XRP"}
 
-            # 4. PREPARA TRANSAZIONE
             amount_drops = str(int(amount * 1_000_000))
             payment_params = {
                 "account": source_address,
@@ -1432,7 +1427,6 @@ class WalletBackend:
                     memo_hex = '0' + memo_hex
                 payment_params["memos"] = [Memo(memo_data=memo_hex)]
 
-            # 5. FIRMA E INVIO
             payment = Payment(**payment_params)
             tx = autofill(payment, client)
             signed_tx = sign(tx, wallet)
@@ -1449,265 +1443,134 @@ class WalletBackend:
         except Exception as e:
             return {"success": False, "tx_hash": "", "message": str(e)}
 
+    # ============================================================
+    # GET HISTORY - UNICO METODO CORRETTO!
+    # ============================================================
+    
     def get_history(self, limit: int = 10) -> Dict[str, Any]:
-        """Ottiene lo storico transazioni - usa internet o reticulum in base al config"""
+        """Ottiene lo storico transazioni - XRP usa XRPL, XLM usa Horizon"""
         if not self.wallet or not self.wallet._xrp_manager:
             return {"success": False, "transactions": [], "count": 0, "message": "No wallet"}
         
         self._ensure_correct_network()
         manager = self.wallet._xrp_manager
         
-        # 🔥 SE INTERNET OFF, USA RETICULUM (FALLBACK AGGIUNTO)
         if not self.use_internet:
             return self._get_history_reticulum(limit)
         
-        # 🔥 ALTRIMENTI USA INTERNET (CODICE ORIGINALE INALTERATO)
-        if manager.crypto_type == "XLM" and XLM_AVAILABLE:
-            return {"success": False, "transactions": [], "count": 0, "message": "XLM history not implemented in backend"}
+        crypto = manager.crypto_type
         
-        address = manager.get_address()
-        network = manager.network
-        
-        try:
-            from xrpl.models.requests import AccountTx
-            from xrpl.models.response import ResponseStatus
-            from xrpl.clients import JsonRpcClient
-            
-            urls = {
-                "mainnet": "https://s1.ripple.com:51234/",
-                "testnet": "https://s.altnet.rippletest.net:51234/",
-                "devnet": "https://s.devnet.rippletest.net:51234/"
-            }
-            client = JsonRpcClient(urls.get(network, urls["testnet"]))
-            request = AccountTx(
-                account=address,
-                ledger_index_min=-1,
-                ledger_index_max=-1,
-                limit=limit,
-                forward=False
-            )
-            response = client.request(request)
-            
-            if response.status != ResponseStatus.SUCCESS:
-                return {"success": False, "transactions": [], "count": 0, "message": str(response.status)}
-            
-            transactions = response.result.get("transactions", [])
-            
-            # 🔥 SENZA CIFRATURA - non decifriamo nulla
-            # I memo sono in chiaro
-            
-            return {
-                "success": True,
-                "transactions": transactions,
-                "count": len(transactions),
-                "address": address,
-                "network": network,
-                "message": "OK"
-            }
-        except Exception as e:
-            return {"success": False, "transactions": [], "count": 0, "message": str(e)}
-    
-    def _send_payment_reticulum(self, to_address: str, amount: float, memo: str) -> Dict[str, Any]:
-        if not self.reticulum or not self.metrics:
-            return {"success": False, "tx_hash": "", "message": "Reticulum non disponibile"}
-
-        gateway = self._select_best_gateway()
-        if not gateway:
-            return {"success": False, "tx_hash": "", "message": "Nessun gateway disponibile"}
-
-        manager = self.wallet._xrp_manager
-        seed_type = manager.seed_type
-
-        # 1. Ottieni il wallet
-        try:
-            if seed_type in ["bip39", "private_key"]:
-                private_key_hex = manager.base_private.hex() if manager.base_private else None
-                if not private_key_hex:
-                    return {"success": False, "tx_hash": "", "message": "Nessuna private key disponibile"}
-                public_key_hex, address = manager._private_key_to_keypair(private_key_hex)
-                from xrpl.wallet import Wallet as XRPWallet
-                from xrpl.constants import CryptoAlgorithm
-                wallet = XRPWallet(
-                    public_key=public_key_hex,
-                    private_key=private_key_hex,
-                    algorithm=CryptoAlgorithm.SECP256K1
-                )
-            else:
-                wallet = manager.get_wallet()
-        except Exception as e:
-            return {"success": False, "tx_hash": "", "message": f"Errore wallet: {e}"}
-
-        # 2. Ottieni ledger corrente e sequenza dal gateway
-        account_info = self._get_account_info_from_gateway(gateway, wallet.classic_address, manager.network)
-        if not account_info.get("success"):
-            return {"success": False, "tx_hash": "", "message": account_info.get("message", "Errore account")}
-        
-        sequence = account_info.get("sequence", 0)
-        current_ledger = account_info.get("ledger_index", 0)
-        
-        if sequence == 0:
-            return {"success": False, "tx_hash": "", "message": "Sequence non valida"}
-
-        # 3. Tentativi con margine crescente
-        max_attempts = 5
-        margin_start = 20
-        margin_increment = 10
-
-        for attempt in range(max_attempts):
-            margin = margin_start + (attempt * margin_increment)
-            last_ledger = current_ledger + margin
-            
-            print_blue(f"📡 Tentativo {attempt+1}/{max_attempts} - Margine: {margin} ledger (LastLedger: {last_ledger})")
-
-            # 4. Prepara e firma la transazione (con Sequence!)
+        # ============================================================
+        # XLM - Horizon DIRETTO
+        # ============================================================
+        if crypto == "XLM":
             try:
-                from xrpl.models.transactions import Payment
-                from xrpl.transaction import sign
-                from xrpl.models.transactions import Memo
-
-                amount_drops = str(int(amount * 1_000_000))
-                payment_params = {
-                    "account": wallet.classic_address,
-                    "amount": amount_drops,
-                    "destination": to_address,
-                    "sequence": sequence,
-                    "last_ledger_sequence": last_ledger,
-                    "fee": "10"   # <-- Fee fissa di 10 drops (0.00001 XRP)
+                import requests
+                address = manager.get_address()
+                horizon_url = "https://horizon-testnet.stellar.org" if manager.network == "testnet" else "https://horizon.stellar.org"
+                
+                url = f"{horizon_url}/accounts/{address}/transactions?limit={limit}&order=desc"
+                response = requests.get(url, timeout=30)
+                
+                if response.status_code != 200:
+                    return {"success": False, "transactions": [], "count": 0, "message": f"Horizon error: {response.status_code}"}
+                
+                data = response.json()
+                transactions = data.get('_embedded', {}).get('records', [])
+                
+                # Per ogni transazione, prendi le operations
+                for tx in transactions:
+                    ops_url = f"{horizon_url}/transactions/{tx.get('hash')}/operations"
+                    try:
+                        ops_response = requests.get(ops_url, timeout=5)
+                        if ops_response.status_code == 200:
+                            ops_data = ops_response.json()
+                            tx['_embedded'] = ops_data.get('_embedded', {})
+                        else:
+                            tx['_embedded'] = {'records': []}
+                    except:
+                        tx['_embedded'] = {'records': []}
+                
+                return {
+                    "success": True,
+                    "transactions": transactions,
+                    "count": len(transactions),
+                    "address": address,
+                    "network": manager.network,
+                    "crypto": "XLM",
+                    "message": "OK"
                 }
-                if memo:
-                    memo_hex = memo.encode('utf-8').hex()
-                    if len(memo_hex) % 2 != 0:
-                        memo_hex = '0' + memo_hex
-                    payment_params["memos"] = [Memo(memo_data=memo_hex)]
-
-                payment = Payment(**payment_params)
-                signed_tx = sign(payment, wallet)
-                signed_tx_blob = signed_tx.blob()  # stringa hex
-
             except Exception as e:
-                print_yellow(f"⚠️ Errore preparazione tentativo {attempt+1}: {e}")
-                continue
-
-            # 5. Invia al gateway
-            request = {
-                "type": "ledger_relay",
-                "version": "1.0",
-                "operation": "submit_transaction",
-                "payload": {
-                    "tx_blob": signed_tx_blob,
-                    "network": manager.network
-                },
-                "timestamp": int(time.time()),
-                "client_gateway_id": self.reticulum.gateway_address
-            }
-
-            print_blue(f"📡 Invio tentativo {attempt+1} a {gateway.get('name', 'UNKNOWN')}")
-
-            response = self._send_reticulum_request(gateway['gateway_id'], request, timeout=60)
-
-            if response and response.get("success"):
-                result = response.get("result", {})
-                tx_hash = result.get("hash", "unknown")
-                result_code = result.get("result_code", "unknown")
-
-                if result_code == "tesSUCCESS":
-                    return {
-                        "success": True,
-                        "tx_hash": tx_hash,
-                        "message": f"Transazione inviata via Reticulum (tentativo {attempt+1})! Hash: {tx_hash}"
-                    }
-                else:
-                    if result_code == "tefMAX_LEDGER":
-                        print_yellow(f"⚠️ LastLedger scaduto (tentativo {attempt+1}), aumento margine...")
-                        continue
-                    elif result_code == "tecFAILED_SEQUENCE":
-                        print_yellow(f"⚠️ Sequence scaduta (tentativo {attempt+1}), aggiorno sequence...")
-                        # Richiedi nuova sequenza
-                        new_info = self._get_account_info_from_gateway(gateway, wallet.classic_address, manager.network)
-                        if new_info.get("success"):
-                            sequence = new_info.get("sequence", sequence)
-                        continue
-                    else:
-                        return {
-                            "success": False,
-                            "tx_hash": tx_hash,
-                            "message": f"Transazione fallita: {result_code}"
-                        }
-            else:
-                error = response.get("error", "Errore sconosciuto") if response else "Nessuna risposta"
-                print_yellow(f"⚠️ Errore Reticulum tentativo {attempt+1}: {error}")
-                continue
-
-        return {
-            "success": False,
-            "tx_hash": "",
-            "message": f"Transazione fallita dopo {max_attempts} tentativi."
-        }
-
-
-    def _get_account_info_from_gateway(self, gateway: Dict, address: str, network: str) -> Dict[str, Any]:
-        """Richiede info account (sequence, balance) al gateway via Reticulum."""
-        request = {
-            "type": "ledger_relay",
-            "version": "1.0",
-            "operation": "get_account_info",
-            "payload": {
-                "address": address,
-                "network": network
-            },
-            "timestamp": int(time.time()),
-            "client_gateway_id": self.reticulum.gateway_address
-        }
+                return {"success": False, "transactions": [], "count": 0, "message": str(e)}
         
-        response = self._send_reticulum_request(gateway['gateway_id'], request, timeout=60)
-        
-        if response and response.get("success"):
-            result = response.get("result", {})
-            return {
-                "success": True,
-                "sequence": result.get("sequence", 0),
-                "balance": result.get("balance", 0),
-                "ledger_index": result.get("ledger_index", 0)
-            }
+        # ============================================================
+        # XRP - XRPL diretto
+        # ============================================================
         else:
-            error = response.get("error", "Nessuna risposta") if response else "Nessuna risposta"
-            return {"success": False, "message": f"Errore account: {error}"}
-
-
-    def _get_ledger_from_gateway(self, gateway: Dict, network: str) -> Dict[str, Any]:
-        """Richiede il ledger corrente al gateway via Reticulum."""
-        request = {
-            "type": "ledger_relay",
-            "version": "1.0",
-            "operation": "get_ledger_info",
-            "payload": {"network": network},
-            "timestamp": int(time.time()),
-            "client_gateway_id": self.reticulum.gateway_address
-        }
-        
-        response = self._send_reticulum_request(gateway['gateway_id'], request, timeout=60)
-        
-        if response and response.get("success"):
-            result = response.get("result", {})
-            return {
-                "success": True,
-                "ledger_index": result.get("ledger_index", 0),
-                "base_fee": result.get("base_fee", "10")
-            }
-        else:
-            error = response.get("error", "Nessuna risposta") if response else "Nessuna risposta"
-            return {"success": False, "message": f"Errore ledger: {error}"}
+            try:
+                from xrpl.models.requests import AccountTx
+                from xrpl.models.response import ResponseStatus
+                from xrpl.clients import JsonRpcClient
+                
+                address = manager.get_address()
+                urls = {
+                    "mainnet": "https://s1.ripple.com:51234/",
+                    "testnet": "https://s.altnet.rippletest.net:51234/",
+                    "devnet": "https://s.devnet.rippletest.net:51234/"
+                }
+                client = JsonRpcClient(urls.get(manager.network, urls["testnet"]))
+                request = AccountTx(
+                    account=address,
+                    ledger_index_min=-1,
+                    ledger_index_max=-1,
+                    limit=limit,
+                    forward=False
+                )
+                response = client.request(request)
+                
+                if response.status != ResponseStatus.SUCCESS:
+                    return {"success": False, "transactions": [], "count": 0, "message": str(response.status)}
+                
+                transactions = response.result.get("transactions", [])
+                
+                return {
+                    "success": True,
+                    "transactions": transactions,
+                    "count": len(transactions),
+                    "address": address,
+                    "network": manager.network,
+                    "crypto": "XRP",
+                    "message": "OK"
+                }
+            except Exception as e:
+                return {"success": False, "transactions": [], "count": 0, "message": str(e)}
 
     def fund_testnet(self) -> Dict[str, Any]:
+        """Fund testnet - XLM usa comando faucet_xlm, XRP no faucet"""
         if not self.wallet or not self.wallet._xrp_manager:
             return {"success": False, "message": "No wallet"}
         
         manager = self.wallet._xrp_manager
-        if manager.crypto_type == "XLM" and XLM_AVAILABLE:
-            faucet_xlm(self)
-            return {"success": True, "message": "Testnet funded"}
-        return {"success": False, "message": "XRP faucet not available"}
-    
+        
+        # XLM - usa faucet_xlm
+        if manager.crypto_type == "XLM":
+            success, output, _ = self._run_xlm_command(faucet_xlm)
+            if success:
+                return {"success": True, "message": "XLM testnet funded"}
+            else:
+                error_msg = output.strip()
+                if "friendbot" in error_msg or "Friendbot" in error_msg:
+                    error_msg = "Errore Friendbot. Riprova più tardi."
+                return {"success": False, "message": error_msg}
+        
+        # XRP - NO faucet automatico
+        else:
+            address = manager.get_address()
+            return {
+                "success": False, 
+                "message": f"XRP faucet non disponibile automaticamente.\nUsa manuale: https://xrpl.org/resources/dev-tools/xrp-faucet.html?account={address}"
+            }
+
     # ============================================================
     # TRUSTLINE
     # ============================================================
@@ -1725,16 +1588,13 @@ class WalletBackend:
             return {"success": False, "message": "No wallet"}
         
         manager = self.wallet._xrp_manager
-        result = manager.set_trustline(asset, issuer, limit)
-        return result
+        return manager.set_trustline(asset, issuer, limit)
     
     def remove_trustline(self, asset: str, issuer: str) -> Dict[str, Any]:
-        """Rimuovi trustline - USA FLAG 0x00020000 per forzare la rimozione"""
         if not self.wallet or not self.wallet._xrp_manager:
             return {"success": False, "message": "No wallet"}
         
         manager = self.wallet._xrp_manager
-        # 🔥 USA limit=0 CON FLAG CORRETTO (fatto in _set_xrp_trustline)
         return manager.set_trustline(asset, issuer, 0)
     
     def get_trustline_info(self, asset: str, issuer: str = None) -> Dict[str, Any]:
@@ -1744,12 +1604,7 @@ class WalletBackend:
         manager = self.wallet._xrp_manager
         return manager.get_trustline_balance(asset, issuer)
     
-    # ============================================================
-    # TOKENS
-    # ============================================================
-    
     def send_token(self, to_address: str, token: str, amount: float, issuer: str = None, destination_tag: int = None) -> Dict[str, Any]:
-        """Invia token con supporto destination_tag"""
         if not self.wallet or not self.wallet._xrp_manager:
             return {"success": False, "tx_hash": "", "message": "No wallet"}
         
@@ -1775,17 +1630,14 @@ class WalletBackend:
             
             amount_obj = IssuedCurrencyAmount(currency=currency, issuer=issuer, value=str(amount))
             
-            # 🔥 COSTRUISCI PAYMENT CON DESTINATION TAG
             payment_params = {
                 "account": wallet.classic_address,
                 "destination": to_address,
                 "amount": amount_obj
             }
             
-            # 🔥 AGGIUNGI DESTINATION TAG SE FORNITO
             if destination_tag is not None:
                 payment_params["destination_tag"] = destination_tag
-                print(f"   Destination Tag: {destination_tag}")
             
             payment = Payment(**payment_params)
             signed_tx = autofill_and_sign(payment, client, wallet)
@@ -1796,21 +1648,11 @@ class WalletBackend:
         except Exception as e:
             return {"success": False, "tx_hash": "", "message": str(e)}
     
-    def receive_token_info(self, token: str, issuer: str, limit: float = 1000000.0) -> Dict[str, Any]:
-        return {
-            "success": True,
-            "token": token,
-            "issuer": issuer,
-            "limit": limit,
-            "message": f"Ready to receive {token}"
-        }
-    
     # ============================================================
     # RETICULUM - PUBBLICHE
     # ============================================================
     
     def get_ip_status(self) -> Dict[str, Any]:
-        """Restituisce IP e stato per il menu."""
         if not self.use_internet:
             return {
                 "ip": "N/A (Reticulum)",
@@ -1824,13 +1666,11 @@ class WalletBackend:
         }
 
     def get_gateway_status(self) -> Dict[str, Any]:
-        """Ottiene lo stato del gateway con nome dal config"""
         if not self.reticulum:
             return {"success": False, "message": "Reticulum not available"}
         
         status = self.reticulum.get_status()
         
-        # 🔥 LEGGI IL NOME DAL CONFIG
         gateway_name = "UNKNOWN"
         try:
             config_path = Path("annuncio_config.json")
@@ -1841,7 +1681,6 @@ class WalletBackend:
         except:
             pass
         
-        # 🔥 IP VISIBILE SOLO SE INTERNET È ON
         if self.use_internet:
             status["public_ip"] = self._get_public_ip()
         else:
@@ -1884,24 +1723,20 @@ class WalletBackend:
             print_red("❌ Errore nell'avvio del gateway")
     
     def discover_gateways(self, active_only: bool = False) -> Dict[str, Any]:
-        """Scopri gateway - TUTTI se active_only=False, solo attivi se True"""
         if not self.reticulum:
             return {"success": False, "gateways": [], "count": 0, "message": "Reticulum not available"}
         
         gateways = self.reticulum.discover_gateways()
         
-        # 🔥 SE active_only=True, APPLICA FILTRO discover_since_seconds
         if active_only:
             since = time.time() - self.reticulum_config.gateway.discover_since_seconds
             gateways = [g for g in gateways if g.get('last_seen', 0) > since]
         
-        # 🔥 ORDINA PER LAST_SEEN (più recenti prima)
         gateways.sort(key=lambda x: x.get('last_seen', 0), reverse=True)
         
         return {"success": True, "gateways": gateways, "count": len(gateways), "message": "OK"}
 
     def discover_wallets(self, active_only: bool = False) -> Dict[str, Any]:
-        """Scopri wallet - TUTTI se active_only=False, solo attivi se True"""
         if not self.reticulum:
             return {"success": False, "wallets": [], "count": 0, "message": "Reticulum not available"}
         
@@ -1923,13 +1758,11 @@ class WalletBackend:
         if not peers:
             return {"success": True, "peers": [], "count": 0, "message": "No peers in DB", "stats": {}}
         
-        # Filtra per TOR se attivo
         if self.use_tor:
             peers = [p for p in peers if p.get('tor_enabled') and p.get('tor_reachable')]
             if not peers:
                 return {"success": True, "peers": [], "count": 0, "message": "Nessun peer TOR disponibile", "stats": {}}
         
-        # Aggiorna nomi da announce_cache
         gateways_result = self.discover_gateways(active_only=False)
         gateways = gateways_result.get("gateways", [])
         gw_map = {gw.get('gateway_id'): gw for gw in gateways if gw.get('gateway_id')}
@@ -1947,21 +1780,17 @@ class WalletBackend:
             p['tor_reachable'] = p.get('tor_reachable', False)
             all_peers.append(p)
         
-        # 🔥 CALCOLO SCORE - CORRETTO
         def calc_score(p):
             score = 0.0
             
-            # Affidabilità (max 30)
             rel = p.get('reliability', 0)
             if rel is not None and rel > 0:
                 score += rel * 30
             
-            # Reputazione (max 15)
             rep = p.get('reputation', 50)
             if rep is not None:
                 score += (rep / 100) * 15
             
-            # Latenza Reticulum (max 10)
             latency = p.get('latency_ms')
             if latency is not None and latency > 0:
                 if latency < 50:    score += 10
@@ -1970,7 +1799,6 @@ class WalletBackend:
                 elif latency < 500: score -= 2
                 else:               score -= 5
             
-            # Hops (max 10)
             hops = p.get('hops')
             if hops is not None:
                 if hops == 1:       score += 10
@@ -1978,10 +1806,8 @@ class WalletBackend:
                 elif hops == 3:     score += 4
                 else:               score -= hops
             
-            # Internet (max 5)
             if p.get('has_internet', False):    score += 5
             
-            # XRP raggiungibile (max 15)
             if p.get('xrp_reachable', False):
                 xrp_lat = p.get('xrp_latency_ms')
                 if xrp_lat is not None and xrp_lat < 300:
@@ -1991,7 +1817,6 @@ class WalletBackend:
                 else:
                     score += 5
             
-            # Stellar raggiungibile (max 15)
             if p.get('stellar_reachable', False):
                 stellar_lat = p.get('stellar_latency_ms')
                 if stellar_lat is not None and stellar_lat < 300:
@@ -2001,7 +1826,6 @@ class WalletBackend:
                 else:
                     score += 5
             
-            # Bonus TOR (max 10)
             if p.get('tor_enabled', False) and p.get('tor_reachable', False):
                 score += 10
             elif p.get('tor_enabled', False):
@@ -2009,14 +1833,11 @@ class WalletBackend:
             
             return max(0, min(100, score))
         
-        # Applica score a ogni peer
         for p in all_peers:
             p['_score'] = calc_score(p)
         
-        # Ordina per score
         peers_sorted = sorted(all_peers, key=lambda x: x.get('_score', 0), reverse=True)
         
-        # Statistiche
         stats = {
             "total_peers": len(peers_sorted),
             "online_peers": sum(1 for p in peers_sorted if p.get('is_online', False)),
@@ -2045,7 +1866,6 @@ class WalletBackend:
         return {"success": True, "gateway": best, "message": "OK"} if best else {"success": False, "message": "No gateway found"}
 
     def _show_single_peer(self, peer: Dict):
-        """Mostra un singolo peer in formato tabella - COMPLETO (con TOR)"""
         print_bold(f"\n🔍 PEER: {peer.get('name', 'UNKNOWN')}")
         print("=" * 120)
         print(f"{'ID':<38} {'Hops':<6} {'RTT':<10} {'XRP':<14} {'Stellar':<14} {'Rep':<5} {'Internet':<9} {'TOR':<6} {'Ultimo visto':<15}")
@@ -2079,7 +1899,6 @@ class WalletBackend:
         rep = str(peer.get('reputation', 50))
         internet_icon = "🌐" if peer.get('has_internet', False) else "📡"
         
-        # 🔥 STATO TOR
         tor_enabled = peer.get('tor_enabled', False)
         tor_reachable = peer.get('tor_reachable', False)
         if tor_enabled and tor_reachable:
@@ -2109,22 +1928,18 @@ class WalletBackend:
         if peer.get('networks'):
             print(f"   Networks: {', '.join(peer.get('networks', []))}")
         
-        # 🔥 MOSTRA STATO TOR IN DETTAGLIO
         if tor_enabled:
             print(f"   TOR: {'✅ Raggiungibile' if tor_reachable else '⚠️ Non raggiungibile'}")
         else:
             print(f"   TOR: ❌ Non attivo")
 
     def request_gateway_info(self, gateway_id: str) -> Dict[str, Any]:
-        """Richiede info a un gateway specifico e RESTITUISCE IL PEER AGGIORNATO"""
         if not self.metrics:
             return {"success": False, "message": "Metrics not available"}
         
-        # 🔥 CHIEDI INFO E ASPETTA RISPOSTA
         success = self.metrics.request_gateway_info(gateway_id)
         
         if success:
-            # 🔥 RECUPERA IL PEER AGGIORNATO
             peers = self.metrics.get_all_peers()
             for p in peers:
                 if p.get('gateway_id') == gateway_id:
@@ -2134,7 +1949,6 @@ class WalletBackend:
             return {"success": False, "message": "Request failed"}
     
     def test_all_gateways(self) -> Dict[str, Any]:
-        """Testa tutti i gateway attivi - USA GatewayMetrics con timeout più lungo per radio"""
         if not self.metrics:
             return {"success": False, "results": [], "count": 0, "message": "Metrics not available"}
         
@@ -2149,8 +1963,6 @@ class WalletBackend:
         tested = 0
         successful = 0
         results = []
-        
-        # 🔥 TIMEOUT PIÙ LUNGO PER RADIO (60 secondi)
         timeout_seconds = 60
         
         for gw in gateways:
@@ -2252,36 +2064,26 @@ class WalletBackend:
         }
     
     def remove_gateway(self, gateway_id: str) -> Dict[str, Any]:
-        """
-        Rimuove un gateway da announce_cache.db e gateway_peers.db
-        """
         try:
             import sqlite3
             removed_from_announce = False
             removed_from_peers = False
             
-            # 1. RIMUOVI DA announce_cache.db
             try:
                 conn = sqlite3.connect("announce_cache.db")
                 c = conn.cursor()
-                
-                # Prova a rimuovere dalla tabella gateway_announces
                 c.execute("DELETE FROM gateway_announces WHERE gateway_id = ?", (gateway_id,))
                 if c.rowcount > 0:
                     removed_from_announce = True
-                
-                # Prova anche da wallet_announces (se presente)
                 try:
                     c.execute("DELETE FROM wallet_announces WHERE wallet_id = ?", (gateway_id,))
                 except:
                     pass
-                
                 conn.commit()
                 conn.close()
             except Exception as e:
                 print_yellow(f"⚠️ Errore rimozione da announce_cache: {e}")
             
-            # 2. RIMUOVI DA gateway_peers.db
             try:
                 conn = sqlite3.connect("gateway_peers.db")
                 c = conn.cursor()
@@ -2320,7 +2122,6 @@ class WalletBackend:
         if self.wallet and self.wallet._xrp_manager:
             self.wallet._xrp_manager._wallet_password = new_password
         
-        # Ricifra tutti i wallet
         wallets = self._get_wallet_list()
         for w in wallets:
             wallet_file = self.wallets_dir / f"{w['name']}.json"

@@ -16,7 +16,6 @@ from PySide6.QtGui import *
 
 from wallet_backend import WalletBackend, create_backend, VERSION, format_time_ago
 from .base_view import ListViewWithDetail
-from .history_view import HistoryView
 from .reticulum_view import ReticulumView
 
 # ============================================================
@@ -36,8 +35,13 @@ class MainWindow(QMainWindow):
         self.backend = None
         self._password = None
         
-        # 🔥 Impostazioni per skin e lingua
+        # Impostazioni per skin e lingua
         self.settings = QSettings("HOPE", "PAX Wallet")
+        
+        # Timer per aggiornare info rete
+        self.network_timer = QTimer()
+        self.network_timer.timeout.connect(self.update_network_status)
+        self.network_timer.start(10000)  # Ogni 10 secondi
         
         self.show_unlock()
     
@@ -151,20 +155,31 @@ class MainWindow(QMainWindow):
         
         # Resetta Dashboard
         if hasattr(self, 'dashboard_view'):
-            self.dashboard_view.balance_label.setText("--.-- XRP")
+            self.dashboard_view.balance_label.setText("--.--")
             self.dashboard_view.address_label.setText("")
             self.dashboard_view.tx_list.clear()
-            self.dashboard_view.tx_list.addItem("Premi 'AGGIORNA' per caricare")
+            self.dashboard_view.tx_list.addItem("🔄 Premi 'AGGIORNA' per caricare il nuovo wallet")
+            self.dashboard_view.crypto = None
         
         # Resetta History
         if hasattr(self, 'history_view'):
             self.history_view.tx_list.clear()
             self.history_view.transactions = []
             self.history_view.filtered_transactions = []
-            self.history_view.tx_list.addItem("📭 Clicca 'AGGIORNA' per caricare lo storico")
+            self.history_view.tx_list.addItem("🔄 Premi 'AGGIORNA' per caricare lo storico")
             self.history_view.clear_detail()
             self.history_view.count_label.setText("")
-            self.history_view.status_label.setText("Pronto")
+            self.history_view.filter_input.clear()
+            self.history_view.direction_combo.setCurrentText("TUTTI")
+            self.history_view.crypto = "XRP"
+            self.history_view.address = ""
+        
+        # Resetta Send
+        if hasattr(self, 'send_view'):
+            self.send_view.address_input.clear()
+            self.send_view.amount_input.clear()
+            self.send_view.memo_input.clear()
+            self.send_view.status_label.setText("🔄 Wallet cambiato")
         
         # Resetta Reticulum
         if hasattr(self, 'reticulum_view'):
@@ -177,12 +192,14 @@ class MainWindow(QMainWindow):
         # Resetta Wallet
         if hasattr(self, 'wallet_view'):
             self.wallet_view.wallet_list.clear()
-            self.wallet_view.wallet_list.addItem("Clicca 'AGGIORNA' per caricare")
+            self.wallet_view.wallet_list.addItem("🔄 Premi 'AGGIORNA' per caricare")
             self.wallet_view.clear_detail()
             self.wallet_view.status_label.setText("")
+            self.wallet_view.wallets = []
         
         # Resetta sidebar
         self.balance_label.setText("--.--")
+        self.wallet_name_label.setText("Caricamento...")
         
         # Aggiorna il nome del wallet nella sidebar (senza saldo)
         self.update_wallet_name()
@@ -214,14 +231,13 @@ class MainWindow(QMainWindow):
         return skins
     
     def update_wallet_name(self):
-        """Aggiorna solo il nome del wallet nella sidebar (senza richiedere il saldo)"""
+        """Aggiorna il nome del wallet nella sidebar (senza richiedere il saldo)"""
         if not self.backend:
             return
         try:
             active = self.backend.get_active_wallet()
             if active.get("name"):
                 self.wallet_name_label.setText(f"{active['name']} ({active['network'].upper()})")
-                # Lascia il saldo invariato (non fare get_balance)
             else:
                 self.wallet_name_label.setText("Nessun wallet")
                 self.balance_label.setText("--.--")
@@ -233,9 +249,25 @@ class MainWindow(QMainWindow):
         if not self.backend:
             return
         try:
-            self.balance_label.setText(f"{balance:.6f} {crypto}")
+            if balance is not None:
+                self.balance_label.setText(f"{balance:.6f} {crypto}")
+            else:
+                self.balance_label.setText(f"--.-- {crypto}")
         except Exception as e:
             self.balance_label.setText(f"⚠️ Errore: {str(e)[:20]}")
+    
+    def update_network_status(self):
+        """Aggiorna lo stato di rete nella UI"""
+        if not self.backend:
+            return
+        
+        # Aggiorna reticulum view se esiste
+        if hasattr(self, 'reticulum_view'):
+            try:
+                # ReticulumView usa update_status() per aggiornare tutto
+                self.reticulum_view.update_status()
+            except Exception as e:
+                print(f"Errore update_network_status: {e}")
 
 
 # ============================================================
@@ -309,14 +341,11 @@ class UnlockWidget(QWidget):
 # DASHBOARD VIEW
 # ============================================================
 
-# ============================================================
-# DASHBOARD VIEW
-# ============================================================
-
 class DashboardView(QWidget):
     def __init__(self, main_window):
         super().__init__()
         self.main = main_window
+        self.crypto = None
         self.setup_ui()
     
     def setup_ui(self):
@@ -343,7 +372,6 @@ class DashboardView(QWidget):
         
         layout.addLayout(header)
         
-        # 🔥 BENVENUTO
         welcome_label = QLabel("Benvenuto in PAX Wallet. Premi 'AGGIORNA' per caricare i tuoi dati.")
         welcome_label.setObjectName("welcome_label")
         welcome_label.setWordWrap(True)
@@ -353,7 +381,7 @@ class DashboardView(QWidget):
         balance_widget.setObjectName("balance_card")
         bal_layout = QVBoxLayout(balance_widget)
         
-        self.balance_label = QLabel("--.-- XRP")
+        self.balance_label = QLabel("--.--")
         self.balance_label.setObjectName("big_balance")
         bal_layout.addWidget(self.balance_label)
         
@@ -391,20 +419,23 @@ class DashboardView(QWidget):
             self.balance_label.setText("⚠️ Backend non disponibile")
             return
         
-        # 🔥 SALDO
+        # SALDO
         try:
             result = self.main.backend.get_balance()
             if result.get("success"):
                 balance = result.get('balance', 0)
                 crypto = result.get('crypto', 'XRP')
+                self.crypto = crypto
                 self.balance_label.setText(f"{balance:.6f} {crypto}")
                 self.main.update_balance_label(balance, crypto)
             else:
                 self.balance_label.setText(f"❌ {result.get('message', 'Errore')}")
+                self.crypto = None
         except Exception as e:
             self.balance_label.setText(f"⚠️ Errore: {str(e)[:30]}")
+            self.crypto = None
         
-        # 🔥 INDIRIZZO
+        # INDIRIZZO
         try:
             result = self.main.backend.get_address()
             if result.get("success"):
@@ -412,7 +443,7 @@ class DashboardView(QWidget):
         except:
             pass
         
-        # 🔥 ULTIME TRANSAZIONI (5)
+        # ULTIME TRANSAZIONI (5)
         try:
             result = self.main.backend.get_history(5)
             self.tx_list.clear()
@@ -427,34 +458,43 @@ class DashboardView(QWidget):
                 return
             
             address = result.get("address", "")
+            crypto = result.get("crypto", "XRP")
+            self.crypto = crypto
             
-            header = f"{'#':<3} {'Data/Ora':<20} {'Tipo':<10} {'Importo':<18} {'Fee':<14} {'Da/A':<50} {'Memo':<30}"
-            self.tx_list.addItem("=" * 150)
+            header = f"{'#':<3} {'Data/Ora':<20} {'Tipo':<12} {'Importo':<22} {'Fee':<12} {'Da/A':<70} {'Memo':<20}"
+            self.tx_list.addItem("=" * 170)
             self.tx_list.addItem(header)
-            self.tx_list.addItem("-" * 150)
+            self.tx_list.addItem("-" * 170)
             
             for idx, tx_data in enumerate(transactions, 1):
-                tx = tx_data.get("tx_json", {})
-                if not tx:
-                    continue
+                if crypto == "XLM":
+                    date_str = self._parse_xlm_date(tx_data)
+                    direction, da_a = self._parse_xlm_direction(tx_data, address)
+                    amount_str = self._parse_xlm_amount(tx_data)
+                    fee_str = self._parse_xlm_fee(tx_data)
+                    memo_str = self._parse_xlm_memo(tx_data)
+                else:
+                    tx = tx_data.get("tx_json", {})
+                    if not tx:
+                        continue
+                    date_str = self._parse_xrp_date(tx, tx_data)
+                    amount_str = self._parse_xrp_amount(tx)
+                    direction, da_a = self._parse_xrp_direction(tx, address)
+                    fee_str = self._parse_xrp_fee(tx)
+                    memo_str = self._parse_xrp_memo(tx)
                 
-                date_str = self._parse_date(tx, tx_data)
-                amount_str = self._parse_amount(tx)
-                direction, da_a = self._parse_direction(tx, address)
-                fee_str = self._parse_fee(tx)
-                memo_str = self._parse_memo(tx)
-                
-                line = f"{idx:<3} {date_str[:19]:<20} {direction:<10} {amount_str:<18} {fee_str:<14} {da_a[:48]:<50} {memo_str[:28]:<30}"
+                line = f"{idx:<3} {date_str[:19]:<20} {direction:<12} {amount_str:<22} {fee_str:<12} {da_a:<70} {memo_str[:18]:<20}"
                 self.tx_list.addItem(line)
             
-            self.tx_list.addItem("=" * 150)
+            self.tx_list.addItem("=" * 170)
             self.tx_list.addItem(f"📊 Ultime {len(transactions)} transazioni")
             
         except Exception as e:
             self.tx_list.clear()
             self.tx_list.addItem(f"⚠️ Errore: {str(e)[:30]}")
     
-    def _parse_date(self, tx, tx_data):
+    # METODI PER XRP
+    def _parse_xrp_date(self, tx, tx_data):
         if "date" in tx:
             try:
                 ledger_time = tx.get("date", 0)
@@ -470,7 +510,7 @@ class DashboardView(QWidget):
                 pass
         return "N/A"
     
-    def _parse_amount(self, tx):
+    def _parse_xrp_amount(self, tx):
         amount = tx.get("Amount", tx.get("DeliverMax", "0"))
         if isinstance(amount, dict):
             token_value = amount.get('value', '0')
@@ -484,7 +524,7 @@ class DashboardView(QWidget):
         except:
             return f"{amount} drops"
     
-    def _parse_direction(self, tx, address):
+    def _parse_xrp_direction(self, tx, address):
         sender = tx.get("Account", "unknown")
         destination = tx.get("Destination", "unknown")
         if destination == address:
@@ -492,16 +532,16 @@ class DashboardView(QWidget):
         elif sender == address:
             return "INVIATO", f"A: {destination}"
         else:
-            return "ALTRO", f"{sender[:20]}... → {destination[:20]}..."
+            return "ALTRO", f"{sender} → {destination}"
     
-    def _parse_fee(self, tx):
+    def _parse_xrp_fee(self, tx):
         fee_drops = tx.get("Fee", "0")
         try:
             return f"{int(fee_drops) / 1_000_000:.6f}"
         except:
             return fee_drops
     
-    def _parse_memo(self, tx):
+    def _parse_xrp_memo(self, tx):
         memos = tx.get("Memos", [])
         if memos:
             try:
@@ -509,162 +549,93 @@ class DashboardView(QWidget):
                 if memo_data:
                     try:
                         memo_bytes = bytes.fromhex(memo_data)
-                        memo_str = memo_bytes.decode('utf-8', errors='ignore')[:28]
-                        return ''.join(c for c in memo_str if c.isprintable() or c == ' ')
+                        memo_str = memo_bytes.decode('utf-8', errors='ignore')[:18]
                     except:
-                        # Se non è esadecimale, mostriamo il dato grezzo (base64 o testo)
-                        return memo_data[:28]
+                        try:
+                            import base64
+                            while len(memo_data) % 4 != 0:
+                                memo_data += '='
+                            memo_bytes = base64.b64decode(memo_data)
+                            memo_str = memo_bytes.decode('utf-8', errors='ignore')[:18]
+                        except:
+                            memo_str = memo_data[:18]
+                    return ''.join(c for c in memo_str if c.isprintable() or c == ' ')
             except:
                 pass
         return ""
     
-    def exit_app(self):
-        reply = QMessageBox.question(
-            self, 
-            "Conferma", 
-            "Sei sicuro di voler uscire?",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No
-        )
-        if reply == QMessageBox.Yes:
-            self.main.close()
-    
-    def update_data(self):
-        if not self.main.backend:
-            self.balance_label.setText("⚠️ Backend non disponibile")
-            return
-        
-        # 🔥 SALDO - richiesta solo quando l'utente clicca AGGIORNA
-        try:
-            result = self.main.backend.get_balance()
-            if result.get("success"):
-                balance = result.get('balance', 0)
-                crypto = result.get('crypto', 'XRP')
-                self.balance_label.setText(f"{balance:.6f} {crypto}")
-                # 🔥 Aggiorna sidebar solo con il saldo (senza rifare richiesta)
-                self.main.update_balance_label(balance, crypto)
-            else:
-                self.balance_label.setText(f"❌ {result.get('message', 'Errore')}")
-        except Exception as e:
-            self.balance_label.setText(f"⚠️ Errore: {str(e)[:30]}")
-        
-        # 🔥 INDIRIZZO
-        try:
-            result = self.main.backend.get_address()
-            if result.get("success"):
-                self.address_label.setText(f"📤 {result.get('address', 'N/A')}")
-        except:
-            pass
-        
-        # 🔥 ULTIME TRANSAZIONI (5)
-        try:
-            result = self.main.backend.get_history(5)
-            self.tx_list.clear()
-            
-            if not result.get("success"):
-                self.tx_list.addItem(f"❌ {result.get('message', 'Errore')}")
-                return
-            
-            transactions = result.get("transactions", [])
-            if not transactions:
-                self.tx_list.addItem("📭 Nessuna transazione recente")
-                return
-            
-            address = result.get("address", "")
-            
-            header = f"{'#':<3} {'Data/Ora':<20} {'Tipo':<10} {'Importo':<18} {'Fee':<14} {'Da/A':<50} {'Memo':<30}"
-            self.tx_list.addItem("=" * 150)
-            self.tx_list.addItem(header)
-            self.tx_list.addItem("-" * 150)
-            
-            for idx, tx_data in enumerate(transactions, 1):
-                tx = tx_data.get("tx_json", {})
-                if not tx:
-                    continue
-                
-                date_str = self._parse_date(tx, tx_data)
-                amount_str = self._parse_amount(tx)
-                direction, da_a = self._parse_direction(tx, address)
-                fee_str = self._parse_fee(tx)
-                memo_str = self._parse_memo(tx)
-                
-                line = f"{idx:<3} {date_str[:19]:<20} {direction:<10} {amount_str:<18} {fee_str:<14} {da_a[:48]:<50} {memo_str[:28]:<30}"
-                self.tx_list.addItem(line)
-            
-            self.tx_list.addItem("=" * 150)
-            self.tx_list.addItem(f"📊 Ultime {len(transactions)} transazioni")
-            
-        except Exception as e:
-            self.tx_list.clear()
-            self.tx_list.addItem(f"⚠️ Errore: {str(e)[:30]}")
-    
-    def _parse_date(self, tx, tx_data):
-        if "date" in tx:
-            try:
-                ledger_time = tx.get("date", 0)
-                if ledger_time:
-                    date_obj = datetime.fromtimestamp(ledger_time + 946684800)
-                    return date_obj.strftime("%Y-%m-%d %H:%M:%S")
-            except:
-                pass
-        if "close_time_iso" in tx_data:
-            try:
-                return tx_data.get("close_time_iso", "").replace("T", " ").replace("Z", "")[:19]
-            except:
-                pass
+    # METODI PER XLM
+    def _parse_xlm_date(self, tx):
+        created_at = tx.get('created_at', '')
+        if created_at:
+            return created_at.replace('T', ' ').replace('Z', '')[:19]
         return "N/A"
     
-    def _parse_amount(self, tx):
-        amount = tx.get("Amount", tx.get("DeliverMax", "0"))
-        if isinstance(amount, dict):
-            token_value = amount.get('value', '0')
-            token_currency = amount.get('currency', '???')
-            try:
-                return f"{float(token_value):.6f} {token_currency}"
-            except:
-                return f"{token_value[:8]} {token_currency}"
+    def _parse_xlm_amount(self, tx):
+        operations = tx.get('_embedded', {}).get('records', [])
+        if operations:
+            op = operations[0]
+            op_type = op.get('type', '')
+            if op_type == 'payment':
+                amount = float(op.get('amount', 0))
+                asset = "XLM" if op.get('asset_type') == 'native' else op.get('asset_code', '?')
+                return f"{amount:.7f} {asset}"
+            elif op_type == 'create_account':
+                amount = float(op.get('starting_balance', 0))
+                return f"{amount:.7f} XLM"
+            elif op_type in ['path_payment_strict_send', 'path_payment_strict_receive']:
+                amount = float(op.get('amount', 0))
+                return f"{amount:.7f} XLM"
+        return ""
+    
+    def _parse_xlm_direction(self, tx, address):
+        operations = tx.get('_embedded', {}).get('records', [])
+        if operations:
+            op = operations[0]
+            op_type = op.get('type', '')
+            if op_type == 'payment':
+                from_acct = op.get('from', '')
+                to_acct = op.get('to', '')
+                if to_acct == address:
+                    return "RICEVUTO", f"Da: {from_acct}"
+                elif from_acct == address:
+                    return "INVIATO", f"A: {to_acct}"
+                else:
+                    return "ALTRO", f"{from_acct} → {to_acct}"
+            elif op_type == 'create_account':
+                to_acct = op.get('account', '')
+                from_acct = op.get('funder', '')
+                if to_acct == address:
+                    return "RICEVUTO", f"Da: {from_acct}"
+                else:
+                    return "INVIATO", f"A: {to_acct}"
+            elif op_type in ['path_payment_strict_send', 'path_payment_strict_receive']:
+                from_acct = op.get('from', '')
+                to_acct = op.get('to', '')
+                if to_acct == address:
+                    return "RICEVUTO", f"Da: {from_acct}"
+                elif from_acct == address:
+                    return "INVIATO", f"A: {to_acct}"
+                else:
+                    return "ALTRO", f"{from_acct} → {to_acct}"
+        return "ALTRO", ""
+    
+    def _parse_xlm_fee(self, tx):
+        fee_stroops = tx.get('fee_charged', 0)
         try:
-            return f"{int(amount) / 1_000_000:.6f} XRP"
+            fee_xlm = int(fee_stroops) / 10_000_000
+            fee_str = f"{fee_xlm:.8f}".rstrip('0').rstrip('.')
+            if not fee_str or fee_str == '':
+                fee_str = "0"
+            return fee_str
         except:
-            return f"{amount} drops"
+            return str(fee_stroops)
     
-    def _parse_direction(self, tx, address):
-        sender = tx.get("Account", "unknown")
-        destination = tx.get("Destination", "unknown")
-        if destination == address:
-            return "RICEVUTO", f"Da: {sender}"
-        elif sender == address:
-            return "INVIATO", f"A: {destination}"
-        else:
-            return "ALTRO", f"{sender[:20]}... → {destination[:20]}..."
-    
-    def _parse_fee(self, tx):
-        fee_drops = tx.get("Fee", "0")
-        try:
-            return f"{int(fee_drops) / 1_000_000:.6f}"
-        except:
-            return fee_drops
-    
-    def _parse_memo(self, tx):
-        memos = tx.get("Memos", [])
-        if memos:
-            try:
-                memo_data = memos[0].get("Memo", {}).get("MemoData", "")
-                if memo_data:
-                    try:
-                        memo_bytes = bytes.fromhex(memo_data)
-                        memo_str = memo_bytes.decode('utf-8', errors='ignore')[:28]
-                    except:
-                        try:
-                            while len(memo_data) % 4 != 0:
-                                memo_data += '='
-                            memo_bytes = base64.b64decode(memo_data)
-                            memo_str = memo_bytes.decode('utf-8', errors='ignore')[:28]
-                        except:
-                            memo_str = memo_data[:28]
-                    return ''.join(c for c in memo_str if c.isprintable() or c == ' ')
-            except:
-                pass
+    def _parse_xlm_memo(self, tx):
+        memo = tx.get('memo', '')
+        if memo:
+            memo_clean = ''.join(c for c in memo if c.isprintable() or c == ' ')
+            return memo_clean[:18]
         return ""
     
     def exit_app(self):
@@ -680,7 +651,441 @@ class DashboardView(QWidget):
 
 
 # ============================================================
-# SEND VIEW
+# HISTORY VIEW
+# ============================================================
+
+class HistoryView(ListViewWithDetail):
+    def __init__(self, main_window):
+        self.main = main_window
+        super().__init__()
+        self.transactions = []
+        self.filtered_transactions = []
+        self.crypto = "XRP"
+        self.address = ""
+        self.filter_direction = "TUTTI"
+        self.setup_controls()
+        self.setup_list()
+        self.refresh_history()
+
+    def setup_controls(self):
+        layout = self.controls_layout
+
+        title = QLabel("◈ STORICO TRANSAZIONI")
+        title.setObjectName("view_title")
+        layout.addWidget(title)
+
+        # Prima riga: Refresh, Limite, Filtro Direzione
+        row = QHBoxLayout()
+        refresh_btn = QPushButton("◈ AGGIORNA")
+        refresh_btn.clicked.connect(self.refresh_history)
+        row.addWidget(refresh_btn)
+
+        row.addWidget(QLabel("Limite:"))
+        self.limit_combo = QComboBox()
+        self.limit_combo.addItems(["10", "25", "50", "100"])
+        self.limit_combo.setCurrentText("10")
+        self.limit_combo.currentTextChanged.connect(self.refresh_history)
+        row.addWidget(self.limit_combo)
+
+        row.addSpacing(20)
+        row.addWidget(QLabel("Mostra:"))
+        
+        # FILTRO PER DIREZIONE (MENU TENDINA)
+        self.direction_combo = QComboBox()
+        self.direction_combo.addItems(["TUTTI", "📥 RICEVUTI", "📤 INVIATI", "🔄 ALTRO"])
+        self.direction_combo.setCurrentText("TUTTI")
+        self.direction_combo.currentTextChanged.connect(self.apply_filter)
+        row.addWidget(self.direction_combo)
+
+        row.addStretch()
+        layout.addLayout(row)
+
+        # Seconda riga: Filtro testuale
+        filter_row = QHBoxLayout()
+        filter_row.addWidget(QLabel("Cerca:"))
+        self.filter_input = QLineEdit()
+        self.filter_input.setPlaceholderText("Cerca per data, tipo, importo, hash, memo...")
+        self.filter_input.textChanged.connect(self.apply_filter)
+        filter_row.addWidget(self.filter_input)
+        layout.addLayout(filter_row)
+
+        self.count_label = QLabel()
+        self.count_label.setObjectName("status")
+        self.count_label.setWordWrap(True)
+        layout.addWidget(self.count_label)
+
+    def setup_list(self):
+        self.tx_list = QListWidget()
+        self.tx_list.setObjectName("tx_list")
+        self.tx_list.setFont(QFont("Courier New", 9))
+        self.tx_list.itemClicked.connect(self.on_item_clicked)
+        self.tx_list.setAlternatingRowColors(True)
+        self.output_layout.addWidget(self.tx_list)
+
+    def refresh_history(self):
+        if not self.main.backend:
+            self.tx_list.clear()
+            self.tx_list.addItem("⚠️ Backend non disponibile")
+            return
+
+        try:
+            limit = int(self.limit_combo.currentText())
+            result = self.main.backend.get_history(limit)
+
+            if not result.get("success"):
+                self.tx_list.clear()
+                self.tx_list.addItem(f"❌ {result.get('message', 'Errore')}")
+                return
+
+            self.transactions = result.get("transactions", [])
+            self.crypto = result.get("crypto", "XRP")
+            self.address = result.get("address", "")
+
+            self.tx_list.clear()
+
+            if not self.transactions:
+                self.tx_list.addItem("📭 Nessuna transazione trovata")
+                self.count_label.setText("0 transazioni")
+                return
+
+            self.apply_filter()
+            self.count_label.setText(f"{len(self.filtered_transactions)} transazioni mostrate")
+
+        except Exception as e:
+            self.tx_list.clear()
+            self.tx_list.addItem(f"⚠️ Errore: {str(e)[:30]}")
+
+    def apply_filter(self):
+        """Applica filtro per direzione e testo"""
+        filter_text = self.filter_input.text().lower().strip()
+        direction = self.direction_combo.currentText()
+        self.tx_list.clear()
+
+        self.filtered_transactions = []
+        for tx in self.transactions:
+            # Filtro per direzione
+            if direction != "TUTTI":
+                tx_direction = self._get_direction(tx)
+                if direction == "📥 RICEVUTI" and tx_direction != "RICEVUTO":
+                    continue
+                if direction == "📤 INVIATI" and tx_direction != "INVIATO":
+                    continue
+                if direction == "🔄 ALTRO" and tx_direction != "ALTRO":
+                    continue
+
+            # Filtro testuale
+            if filter_text:
+                searchable = str(tx).lower()
+                if filter_text not in searchable:
+                    continue
+
+            self.filtered_transactions.append(tx)
+
+        self.display_transactions()
+
+    def _get_direction(self, tx_data) -> str:
+        """Determina la direzione di una transazione"""
+        if self.crypto == "XLM":
+            operations = tx_data.get('_embedded', {}).get('records', [])
+            if operations:
+                op = operations[0]
+                op_type = op.get('type', '')
+                if op_type == 'payment':
+                    to_acct = op.get('to', '')
+                    if to_acct == self.address:
+                        return "RICEVUTO"
+                    elif op.get('from', '') == self.address:
+                        return "INVIATO"
+                elif op_type == 'create_account':
+                    if op.get('account', '') == self.address:
+                        return "RICEVUTO"
+                    elif op.get('funder', '') == self.address:
+                        return "INVIATO"
+        else:
+            tx = tx_data.get("tx_json", {})
+            if tx:
+                destination = tx.get("Destination", "")
+                sender = tx.get("Account", "")
+                if destination == self.address:
+                    return "RICEVUTO"
+                elif sender == self.address:
+                    return "INVIATO"
+        return "ALTRO"
+
+    def display_transactions(self):
+        if not self.filtered_transactions:
+            self.tx_list.addItem("📭 Nessuna transazione corrisponde al filtro")
+            return
+
+        header = f"{'#':<4} {'Data/Ora':<20} {'Tipo':<12} {'Importo':<22} {'Fee':<12} {'Da/A':<70} {'Memo':<20}"
+        self.tx_list.addItem("=" * 165)
+        self.tx_list.addItem(header)
+        self.tx_list.addItem("-" * 165)
+
+        for idx, tx_data in enumerate(self.filtered_transactions, 1):
+            if self.crypto == "XLM":
+                line = self._format_xlm_transaction(tx_data, idx)
+            else:
+                line = self._format_xrp_transaction(tx_data, idx)
+
+            if line:
+                self.tx_list.addItem(line)
+
+        self.tx_list.addItem("=" * 165)
+
+    def _format_xlm_transaction(self, tx_data, idx):
+        created_at = tx_data.get('created_at', '')
+        date_str = created_at.replace('T', ' ').replace('Z', '')[:19] if created_at else 'N/A'
+
+        amount_str = ""
+        operations = tx_data.get('_embedded', {}).get('records', [])
+        if operations:
+            op = operations[0]
+            op_type = op.get('type', '')
+            if op_type == 'payment':
+                amount = float(op.get('amount', 0))
+                asset = "XLM" if op.get('asset_type') == 'native' else op.get('asset_code', '?')
+                amount_str = f"{amount:.7f} {asset}"
+            elif op_type == 'create_account':
+                amount = float(op.get('starting_balance', 0))
+                amount_str = f"{amount:.7f} XLM"
+            elif op_type in ['path_payment_strict_send', 'path_payment_strict_receive']:
+                amount = float(op.get('amount', 0))
+                amount_str = f"{amount:.7f} XLM"
+
+        fee_stroops = tx_data.get('fee_charged', 0)
+        try:
+            fee_xlm = int(fee_stroops) / 10_000_000
+            fee_str = f"{fee_xlm:.8f}".rstrip('0').rstrip('.')
+            if not fee_str or fee_str == '':
+                fee_str = "0"
+        except:
+            fee_str = str(fee_stroops)
+
+        direction = "ALTRO"
+        da_a = ""
+        if operations:
+            op = operations[0]
+            op_type = op.get('type', '')
+            if op_type == 'payment':
+                from_acct = op.get('from', '')
+                to_acct = op.get('to', '')
+                if to_acct == self.address:
+                    direction = "RICEVUTO"
+                    da_a = f"Da: {from_acct}"
+                elif from_acct == self.address:
+                    direction = "INVIATO"
+                    da_a = f"A: {to_acct}"
+                else:
+                    direction = "ALTRO"
+                    da_a = f"{from_acct} → {to_acct}"
+            elif op_type == 'create_account':
+                to_acct = op.get('account', '')
+                from_acct = op.get('funder', '')
+                if to_acct == self.address:
+                    direction = "RICEVUTO"
+                    da_a = f"Da: {from_acct}"
+                else:
+                    direction = "INVIATO"
+                    da_a = f"A: {to_acct}"
+            elif op_type in ['path_payment_strict_send', 'path_payment_strict_receive']:
+                from_acct = op.get('from', '')
+                to_acct = op.get('to', '')
+                if to_acct == self.address:
+                    direction = "RICEVUTO"
+                    da_a = f"Da: {from_acct}"
+                elif from_acct == self.address:
+                    direction = "INVIATO"
+                    da_a = f"A: {to_acct}"
+                else:
+                    direction = "ALTRO"
+                    da_a = f"{from_acct} → {to_acct}"
+
+        memo_str = tx_data.get('memo', '')[:18]
+
+        return f"{idx:<4} {date_str[:19]:<20} {direction:<12} {amount_str:<22} {fee_str:<12} {da_a:<70} {memo_str:<20}"
+
+    def _format_xrp_transaction(self, tx_data, idx):
+        tx = tx_data.get("tx_json", {})
+        if not tx:
+            return None
+
+        date_str = "N/A"
+        if "date" in tx:
+            try:
+                ledger_time = tx.get("date", 0)
+                if ledger_time:
+                    date_obj = datetime.fromtimestamp(ledger_time + 946684800)
+                    date_str = date_obj.strftime("%Y-%m-%d %H:%M:%S")
+            except:
+                pass
+        elif "close_time_iso" in tx_data:
+            try:
+                date_str = tx_data.get("close_time_iso", "").replace("T", " ").replace("Z", "")[:19]
+            except:
+                pass
+
+        amount = tx.get("Amount", tx.get("DeliverMax", "0"))
+        if isinstance(amount, dict):
+            token_value = amount.get('value', '0')
+            token_currency = amount.get('currency', '???')
+            try:
+                amount_str = f"{float(token_value):.6f} {token_currency}"
+            except:
+                amount_str = f"{token_value[:8]} {token_currency}"
+        else:
+            try:
+                amount_xrp = int(amount) / 1_000_000
+                amount_str = f"{amount_xrp:.6f} XRP"
+            except:
+                amount_str = f"{amount}"
+
+        fee_drops = tx.get("Fee", "0")
+        try:
+            fee_str = f"{int(fee_drops) / 1_000_000:.6f}"
+        except:
+            fee_str = str(fee_drops)
+
+        sender = tx.get("Account", "unknown")
+        destination = tx.get("Destination", "unknown")
+        if destination == self.address:
+            direction = "RICEVUTO"
+            da_a = f"Da: {sender}"
+        elif sender == self.address:
+            direction = "INVIATO"
+            da_a = f"A: {destination}"
+        else:
+            direction = "ALTRO"
+            da_a = f"{sender} → {destination}"
+
+        memo_str = ""
+        memos = tx.get("Memos", [])
+        if memos:
+            try:
+                memo_data = memos[0].get("Memo", {}).get("MemoData", "")
+                if memo_data:
+                    try:
+                        memo_bytes = bytes.fromhex(memo_data)
+                        memo_str = memo_bytes.decode('utf-8', errors='ignore')[:18]
+                    except:
+                        try:
+                            import base64
+                            while len(memo_data) % 4 != 0:
+                                memo_data += '='
+                            memo_bytes = base64.b64decode(memo_data)
+                            memo_str = memo_bytes.decode('utf-8', errors='ignore')[:18]
+                        except:
+                            memo_str = memo_data[:18]
+                    memo_str = ''.join(c for c in memo_str if c.isprintable() or c == ' ')
+            except:
+                pass
+
+        return f"{idx:<4} {date_str[:19]:<20} {direction:<12} {amount_str:<22} {fee_str:<12} {da_a:<70} {memo_str:<20}"
+
+    def on_item_clicked(self, item):
+        text = item.text()
+        if text.startswith("=") or text.startswith("-") or text.startswith("#"):
+            return
+
+        try:
+            idx_str = text[:4].strip()
+            idx = int(idx_str) - 1
+        except:
+            return
+
+        if idx < 0 or idx >= len(self.filtered_transactions):
+            return
+
+        tx_data = self.filtered_transactions[idx]
+        html = "<b>📋 DETTAGLIO TRANSAZIONE</b><br><br>"
+
+        if self.crypto == "XLM":
+            html += f"<b>Hash:</b> {tx_data.get('hash', 'N/A')}<br>"
+            html += f"<b>Data:</b> {tx_data.get('created_at', 'N/A')}<br>"
+            html += f"<b>Tipo:</b> {tx_data.get('type', 'N/A')}<br>"
+            html += f"<b>Memo:</b> {tx_data.get('memo', 'N/A')}<br>"
+
+            fee_stroops = tx_data.get('fee_charged', 0)
+            try:
+                fee_xlm = int(fee_stroops) / 10_000_000
+                html += f"<b>Fee:</b> {fee_xlm:.8f} XLM<br>"
+            except:
+                html += f"<b>Fee:</b> {fee_stroops} stroops<br>"
+
+            operations = tx_data.get('_embedded', {}).get('records', [])
+            if operations:
+                html += "<br><b>Operations:</b><br>"
+                for op in operations:
+                    html += f"  • {op.get('type', 'unknown')}<br>"
+                    if op.get('type') == 'payment':
+                        html += f"    Da: {op.get('from', 'N/A')}<br>"
+                        html += f"    A: {op.get('to', 'N/A')}<br>"
+                        html += f"    Importo: {op.get('amount', '0')} {op.get('asset_code', 'XLM')}<br>"
+
+            if tx_data.get('successful'):
+                html += "<br>✅ <b>Stato:</b> SUCCESSO"
+            else:
+                html += "<br>❌ <b>Stato:</b> FALLITA"
+        else:
+            tx = tx_data.get("tx_json", {})
+            if tx:
+                html += f"<b>Hash:</b> {tx_data.get('hash', 'N/A')}<br>"
+                html += f"<b>Tipo:</b> {tx.get('TransactionType', 'N/A')}<br>"
+                html += f"<b>Account:</b> {tx.get('Account', 'N/A')}<br>"
+                html += f"<b>Destination:</b> {tx.get('Destination', 'N/A')}<br>"
+
+                amount = tx.get("Amount", tx.get("DeliverMax", "0"))
+                if isinstance(amount, dict):
+                    html += f"<b>Importo:</b> {amount.get('value', '0')} {amount.get('currency', '???')}<br>"
+                else:
+                    try:
+                        amount_xrp = int(amount) / 1_000_000
+                        html += f"<b>Importo:</b> {amount_xrp:.6f} XRP<br>"
+                    except:
+                        html += f"<b>Importo:</b> {amount}<br>"
+
+                fee_drops = tx.get("Fee", "0")
+                try:
+                    fee_xrp = int(fee_drops) / 1_000_000
+                    html += f"<b>Fee:</b> {fee_xrp:.6f} XRP<br>"
+                except:
+                    html += f"<b>Fee:</b> {fee_drops}<br>"
+
+                memos = tx.get("Memos", [])
+                if memos:
+                    try:
+                        memo_data = memos[0].get("Memo", {}).get("MemoData", "")
+                        if memo_data:
+                            try:
+                                memo_bytes = bytes.fromhex(memo_data)
+                                memo_str = memo_bytes.decode('utf-8', errors='ignore')
+                            except:
+                                try:
+                                    import base64
+                                    while len(memo_data) % 4 != 0:
+                                        memo_data += '='
+                                    memo_bytes = base64.b64decode(memo_data)
+                                    memo_str = memo_bytes.decode('utf-8', errors='ignore')
+                                except:
+                                    memo_str = memo_data
+                            html += f"<b>Memo:</b> {memo_str}<br>"
+                    except:
+                        pass
+
+                result_code = tx_data.get('meta', {}).get('TransactionResult', '')
+                if result_code == "tesSUCCESS":
+                    html += "<br>✅ <b>Stato:</b> SUCCESSO"
+                else:
+                    html += f"<br>❌ <b>Stato:</b> {result_code or 'N/A'}"
+
+        self.set_detail_html(html)
+
+    def clear_detail(self):
+        self.set_detail_html("Seleziona una transazione per vedere i dettagli")
+
+
+# ============================================================
+# SEND VIEW - SENZA CIFRATURA MEMO
 # ============================================================
 
 class SendView(QWidget):
@@ -714,12 +1119,6 @@ class SendView(QWidget):
         self.memo_input = QLineEdit()
         self.memo_input.setPlaceholderText("> memo (optional)")
         form_layout.addRow("MEMO:", self.memo_input)
-        
-        # 🔥 AGGIUNGI CHECKBOX PER CIFRATURA
-        self.encrypt_check = QCheckBox("Cifra memo (end-to-end)")
-        self.encrypt_check.setChecked(True)  # default attivo
-        self.encrypt_check.setToolTip("Se attivo, il memo sarà cifrato con la chiave pubblica del destinatario (solo XRP)")
-        form_layout.addRow("", self.encrypt_check)
         
         layout.addWidget(form)
         
@@ -756,7 +1155,7 @@ class SendView(QWidget):
             return
         
         memo = self.memo_input.text().strip()
-        encrypt = self.encrypt_check.isChecked()
+        encrypt = False
         
         self.send_btn.setEnabled(False)
         self.status_label.setText("⏳ > SENDING...")
@@ -768,8 +1167,6 @@ class SendView(QWidget):
                 self.address_input.clear()
                 self.amount_input.clear()
                 self.memo_input.clear()
-                # 🔥 RESETTA IL CHECKBOX AL DEFAULT (opzionale)
-                self.encrypt_check.setChecked(True)
             else:
                 self.status_label.setText(f"❌ > ERROR: {result.get('message', 'UNKNOWN')}")
         except Exception as e:
@@ -777,9 +1174,8 @@ class SendView(QWidget):
         
         self.send_btn.setEnabled(True)
 
-
 # ============================================================
-# WALLET VIEW - CON NUOVO LAYOUT (ListViewWithDetail)
+# WALLET VIEW
 # ============================================================
 
 class WalletView(ListViewWithDetail):
@@ -874,13 +1270,14 @@ class WalletView(ListViewWithDetail):
             for w in self.wallets:
                 marker = "▶ " if w.get("is_active") else "  "
                 self.wallet_list.addItem(f"{marker}{w['name']} ({w['crypto']} - {w['network']})")
-            self.update_network_status()
+            self.update_wallet_network_status()
             self.show_status(f"{len(self.wallets)} wallet trovati")
         except Exception as e:
             self.wallet_list.addItem(f"⚠️ Errore: {e}")
             self.show_status(f"Errore: {e}", True)
 
-    def update_network_status(self):
+    def update_wallet_network_status(self):
+        """Aggiorna lo stato di rete del wallet (network e crypto combo)"""
         if not self.main.backend:
             return
         try:
@@ -910,7 +1307,6 @@ class WalletView(ListViewWithDetail):
             self.status_label.setText(f"✅ {msg}")
 
     def on_item_clicked(self, item):
-        """Mostra dettaglio del wallet selezionato"""
         name = self.get_selected_wallet()
         if not name:
             return
@@ -948,15 +1344,12 @@ class WalletView(ListViewWithDetail):
         
         result = self.main.backend.create_wallet(name, crypto, network, strength, passphrase)
         if result.get("success"):
-            self.show_status(f"Wallet '{name}' creato! Address: {result.get('address', 'N/A')[:16]}...")
+            self.show_status(f"Wallet '{name}' creato! Address: {result.get('address', 'N/A')}")
             self.refresh_list()
             self.main.update_wallet_name()
-            
-            # 🔥 RESETTA TUTTE LE VIEW
             self.main.reset_all_views()
         else:
             self.show_status(result.get("error", "Errore sconosciuto"), True)
-
 
     def import_wallet(self):
         seed, ok = QInputDialog.getText(self, "Importa Wallet", "Seed/Mnemonic/Numeri:")
@@ -987,15 +1380,12 @@ class WalletView(ListViewWithDetail):
         
         result = self.main.backend.import_wallet(seed, name, crypto, network, passphrase)
         if result.get("success"):
-            self.show_status(f"Wallet '{name}' importato! Address: {result.get('address', 'N/A')[:16]}...")
+            self.show_status(f"Wallet '{name}' importato! Address: {result.get('address', 'N/A')}")
             self.refresh_list()
             self.main.update_wallet_name()
-            
-            # 🔥 RESETTA TUTTE LE VIEW
             self.main.reset_all_views()
         else:
             self.show_status(result.get("error", "Errore sconosciuto"), True)
-
 
     def remove_wallet(self):
         name = self.get_selected_wallet()
@@ -1015,8 +1405,6 @@ class WalletView(ListViewWithDetail):
                 self.show_status(f"Wallet '{name}' rimosso")
                 self.refresh_list()
                 self.main.update_wallet_name()
-                
-                # 🔥 RESETTA TUTTE LE VIEW
                 self.main.reset_all_views()
             else:
                 self.show_status(result.get("message", "Errore sconosciuto"), True)
@@ -1031,12 +1419,10 @@ class WalletView(ListViewWithDetail):
         if result.get("success"):
             self.show_status(f"Wallet cambiato a: {name}")
             self.refresh_list()
-            
-            # 🔥 RESETTA TUTTE LE VIEW
+            self.main.update_wallet_name()
             self.main.reset_all_views()
         else:
             self.show_status(result.get("message", "Errore sconosciuto"), True)
-
 
     def derive_addresses(self):
         keyword, ok = QInputDialog.getText(self, "Deriva Indirizzi", "Keyword (default):")
@@ -1142,10 +1528,10 @@ class WalletView(ListViewWithDetail):
             manager = self.main.backend.wallet._xrp_manager
             manager.set_network(network)
             self.show_status(f"Network cambiato a: {network.upper()}")
-            self.main.update_wallet_name()  # solo nome
+            self.main.update_wallet_name()
         except Exception as e:
             self.show_status(f"Errore: {e}", True)
-            self.update_network_status()
+            self.update_wallet_network_status()
 
     def change_crypto(self, crypto):
         if not self.main.backend:
@@ -1154,10 +1540,10 @@ class WalletView(ListViewWithDetail):
             manager = self.main.backend.wallet._xrp_manager
             manager.set_crypto(crypto)
             self.show_status(f"Crypto cambiata a: {crypto}")
-            self.main.update_wallet_name()  # solo nome
+            self.main.update_wallet_name()
         except Exception as e:
             self.show_status(f"Errore: {e}", True)
-            self.update_network_status()
+            self.update_wallet_network_status()
 
 
 # ============================================================
@@ -1187,9 +1573,7 @@ class SettingsView(QWidget):
         scroll_layout = QVBoxLayout(scroll_widget)
         scroll_layout.setSpacing(15)
         
-        # ========================================
-        # 1. SECURITY - Cambia Password
-        # ========================================
+        # SECURITY - Cambia Password
         pwd_group = QGroupBox("◈ CAMBIA PASSWORD")
         pwd_layout = QFormLayout(pwd_group)
         
@@ -1212,9 +1596,7 @@ class SettingsView(QWidget):
         pwd_layout.addRow("", change_btn)
         scroll_layout.addWidget(pwd_group)
         
-        # ========================================
-        # 2. NETWORK - Internet / TOR
-        # ========================================
+        # NETWORK - Internet / TOR
         net_group = QGroupBox("◈ RETE")
         net_layout = QVBoxLayout(net_group)
         
@@ -1254,9 +1636,7 @@ class SettingsView(QWidget):
         
         scroll_layout.addWidget(net_group)
         
-        # ========================================
-        # 3. GATEWAY CONFIG
-        # ========================================
+        # GATEWAY CONFIG
         gw_group = QGroupBox("◈ CONFIGURAZIONE GATEWAY")
         gw_layout = QFormLayout(gw_group)
         
@@ -1304,9 +1684,7 @@ class SettingsView(QWidget):
         
         scroll_layout.addWidget(gw_group)
         
-        # ========================================
-        # 4. WALLET CONFIG
-        # ========================================
+        # WALLET CONFIG
         w_group = QGroupBox("◈ CONFIGURAZIONE WALLET")
         w_layout = QFormLayout(w_group)
         
@@ -1326,9 +1704,7 @@ class SettingsView(QWidget):
         
         scroll_layout.addWidget(w_group)
         
-        # ========================================
-        # 5. SYNC CONFIG
-        # ========================================
+        # SYNC CONFIG
         sync_group = QGroupBox("◈ SYNC")
         sync_layout = QFormLayout(sync_group)
         
@@ -1343,9 +1719,7 @@ class SettingsView(QWidget):
         
         scroll_layout.addWidget(sync_group)
         
-        # ========================================
-        # 6. BACKGROUND
-        # ========================================
+        # BACKGROUND
         bg_group = QGroupBox("◈ BACKGROUND")
         bg_layout = QHBoxLayout(bg_group)
         self.background_check = QCheckBox("Background mode")
@@ -1353,21 +1727,16 @@ class SettingsView(QWidget):
         bg_layout.addStretch()
         scroll_layout.addWidget(bg_group)
         
-        # ========================================
-        # 🔥 SKIN SELECTOR
-        # ========================================
+        # SKIN SELECTOR
         skin_group = QGroupBox("🎨 SKIN")
         skin_layout = QHBoxLayout(skin_group)
         self.skin_combo = QComboBox()
 
-        # Popola le skin disponibili
         available_skins = self.main.get_available_skins()
         for skin in available_skins:
-            # Mostra il nome formattato
             display_name = skin.capitalize()
             self.skin_combo.addItem(display_name, skin)
 
-        # Imposta la skin corrente
         current_skin = self.main.settings.value("skin", "dark")
         index = self.skin_combo.findData(current_skin)
         if index >= 0:
@@ -1379,9 +1748,7 @@ class SettingsView(QWidget):
         skin_layout.addStretch()
         scroll_layout.addWidget(skin_group)
         
-        # ========================================
-        # 🔥 NUOVO: LANGUAGE SELECTOR
-        # ========================================
+        # LANGUAGE SELECTOR
         lang_group = QGroupBox("🌍 LINGUA")
         lang_layout = QHBoxLayout(lang_group)
         self.lang_combo = QComboBox()
@@ -1393,9 +1760,7 @@ class SettingsView(QWidget):
         lang_layout.addStretch()
         scroll_layout.addWidget(lang_group)
         
-        # ========================================
-        # 7. BOTTONI SALVA E RICARICA
-        # ========================================
+        # BOTTONI SALVA E RICARICA
         btn_layout = QHBoxLayout()
         save_btn = QPushButton("◈ SALVA CONFIG")
         save_btn.clicked.connect(self.save_config)
@@ -1422,12 +1787,8 @@ class SettingsView(QWidget):
         self.load_config()
         self.update_network_status()
     
-    # ============================================================
     # METODI PER SKIN E LINGUA
-    # ============================================================
-    
     def change_skin(self, index):
-        """Cambia skin al volo"""
         skin_name = self.skin_combo.itemData(index)
         if skin_name:
             if self.main.apply_skin(skin_name):
@@ -1436,14 +1797,9 @@ class SettingsView(QWidget):
                 self.status_label.setText(f"❌ Skin {skin_name} non trovata")
     
     def change_language(self, lang_name):
-        """Cambia lingua (placeholder per ora)"""
         self.status_label.setText(f"✅ Lingua cambiata: {lang_name}")
-        # Qui puoi implementare il LanguageManager quando sarà pronto
     
-    # ============================================================
     # METODI ESISTENTI
-    # ============================================================
-    
     def load_config(self):
         try:
             config_path = Path("annuncio_config.json")
