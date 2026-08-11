@@ -170,6 +170,34 @@ QWidget {
 }
 
 /* ============================================================
+   RUBRICA - FORZA FONT MONOSPACE PER ALLINEAMENTO
+   ============================================================ */
+
+#contact_list {
+    background-color: #fcf5ef;
+    border: 1px solid #e8ddd0;
+    border-radius: 14px;
+    color: #4a3f3a;
+    padding: 5px;
+    font-family: "Courier New", "Monaco", "Consolas", monospace;
+    font-size: 11px;
+}
+
+#contact_list::item {
+    padding: 6px 12px;
+    border-radius: 8px;
+}
+
+#contact_list::item:hover {
+    background-color: #f0e8e0;
+}
+
+#contact_list::item:selected {
+    background-color: #d4a88c;
+    color: #fef8f5;
+}
+
+/* ============================================================
    DETAIL PANEL (per ListViewWithDetail)
    ============================================================ */
 
@@ -177,13 +205,15 @@ QWidget {
     background-color: #fcf5ef;
     border: 1px solid #e8ddd0;
     border-radius: 14px;
-    padding: 12px;
+    padding: 8px;
 }
 
 #detail_title {
     color: #d4a88c;
     font-weight: 600;
-    font-size: 13px;
+    font-size: 12px;
+    padding: 0px;
+    margin: 0px;
 }
 
 #detail_text {
@@ -191,9 +221,10 @@ QWidget {
     color: #4a3f3a;
     border: 1px solid #e8ddd0;
     border-radius: 10px;
-    padding: 10px;
+    padding: 8px;
     font-family: "Segoe UI", "Helvetica Neue", sans-serif;
-    font-size: 12px;
+    font-size: 11px;
+    min-height: 50px;
 }
 
 /* ============================================================
@@ -278,6 +309,28 @@ QPushButton:disabled {
 }
 
 /* ============================================================
+   BOTTONE INVIA RUBRICA (VERDE PASTELLO)
+   ============================================================ */
+
+#send_btn_contact {
+    background-color: #8cb8a8;
+    color: #fef8f5;
+    font-weight: 600;
+    padding: 10px 20px;
+    border: none;
+    border-radius: 12px;
+    font-size: 13px;
+}
+
+#send_btn_contact:hover {
+    background-color: #7ca898;
+}
+
+#send_btn_contact:pressed {
+    background-color: #6c9888;
+}
+
+/* ============================================================
    INPUT
    ============================================================ */
 
@@ -297,6 +350,46 @@ QLineEdit:focus {
 
 QLineEdit::placeholder {
     color: #c0b0a0;
+}
+
+/* ============================================================
+   COMBO BOX
+   ============================================================ */
+
+QComboBox {
+    background-color: #fcf5ef;
+    color: #4a3f3a;
+    border: 1px solid #e8ddd0;
+    border-radius: 12px;
+    padding: 8px 14px;
+    font-family: "Segoe UI", "Helvetica Neue", sans-serif;
+    font-size: 13px;
+}
+
+QComboBox:hover {
+    border-color: #d4a88c;
+}
+
+QComboBox::drop-down {
+    border: none;
+    padding-right: 10px;
+}
+
+QComboBox::down-arrow {
+    image: none;
+    border-left: 5px solid transparent;
+    border-right: 5px solid transparent;
+    border-top: 5px solid #b0a090;
+    margin-right: 5px;
+}
+
+QComboBox QAbstractItemView {
+    background-color: #fcf5ef;
+    color: #4a3f3a;
+    border: 1px solid #e8ddd0;
+    border-radius: 12px;
+    selection-background-color: #d4a88c;
+    selection-color: #fef8f5;
 }
 
 /* ============================================================
@@ -340,6 +433,35 @@ QLabel {
     font-size: 13px;
 }
 
+#status_value {
+    color: #4a3f3a;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+#ip_label {
+    color: #4a3f3a;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+#tor_label {
+    color: #4a3f3a;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+#internet_label {
+    color: #4a3f3a;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+#network_info {
+    color: #4a3f3a;
+    font-size: 13px;
+}
+
 /* ============================================================
    SPIN BOX
    ============================================================ */
@@ -367,6 +489,32 @@ QSpinBox::up-button:hover, QSpinBox::down-button:hover {
 }
 
 /* ============================================================
+   CHECK BOX
+   ============================================================ */
+
+QCheckBox {
+    color: #4a3f3a;
+    font-family: "Segoe UI", "Helvetica Neue", sans-serif;
+}
+
+QCheckBox::indicator {
+    width: 18px;
+    height: 18px;
+    border: 2px solid #b0a090;
+    border-radius: 4px;
+    background-color: #fcf5ef;
+}
+
+QCheckBox::indicator:checked {
+    background-color: #d4a88c;
+    border-color: #d4a88c;
+}
+
+QCheckBox::indicator:hover {
+    border-color: #d4a88c;
+}
+
+/* ============================================================
    RADIO BUTTON
    ============================================================ */
 
@@ -385,6 +533,24 @@ QRadioButton::indicator {
 
 QRadioButton::indicator:checked {
     background-color: #d4a88c;
+    border-color: #d4a88c;
+}
+
+/* ============================================================
+   TEXT EDIT
+   ============================================================ */
+
+QTextEdit {
+    background-color: #fcf5ef;
+    color: #4a3f3a;
+    border: 1px solid #e8ddd0;
+    border-radius: 12px;
+    padding: 8px;
+    font-family: "Segoe UI", "Helvetica Neue", sans-serif;
+    font-size: 12px;
+}
+
+QTextEdit:focus {
     border-color: #d4a88c;
 }
 
@@ -468,4 +634,86 @@ QSplitter::handle {
 QScrollArea {
     background-color: transparent;
     border: none;
+}
+
+/* ============================================================
+   INPUT DIALOG
+   ============================================================ */
+
+QDialog {
+    background-color: #fcf5ef;
+    color: #4a3f3a;
+}
+
+QDialog QLabel {
+    color: #4a3f3a;
+}
+
+QDialog QLineEdit {
+    background-color: #fcf5ef;
+    color: #4a3f3a;
+    border: 1px solid #e8ddd0;
+    border-radius: 12px;
+    padding: 8px 12px;
+}
+
+QDialog QLineEdit:focus {
+    border-color: #d4a88c;
+}
+
+QDialog QPushButton {
+    background-color: #d4a88c;
+    color: #fef8f5;
+    border: none;
+    border-radius: 12px;
+    padding: 8px 16px;
+}
+
+QDialog QPushButton:hover {
+    background-color: #c8987c;
+}
+
+QDialog QComboBox {
+    background-color: #fcf5ef;
+    color: #4a3f3a;
+    border: 1px solid #e8ddd0;
+    border-radius: 12px;
+    padding: 6px 12px;
+}
+
+QDialog QComboBox:hover {
+    border-color: #d4a88c;
+}
+
+QDialog QComboBox QAbstractItemView {
+    background-color: #fcf5ef;
+    color: #4a3f3a;
+    border: 1px solid #e8ddd0;
+    selection-background-color: #d4a88c;
+    selection-color: #fef8f5;
+}
+
+QDialog QTextEdit {
+    background-color: #fcf5ef;
+    color: #4a3f3a;
+    border: 1px solid #e8ddd0;
+    border-radius: 12px;
+    padding: 8px;
+}
+
+QDialog QCheckBox {
+    color: #4a3f3a;
+}
+
+QDialog QCheckBox::indicator {
+    width: 18px;
+    height: 18px;
+    border: 2px solid #b0a090;
+    border-radius: 4px;
+    background-color: #fcf5ef;
+}
+
+QDialog QCheckBox::indicator:checked {
+    background-color: #d4a88c;
+    border-color: #d4a88c;
 }

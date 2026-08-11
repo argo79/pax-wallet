@@ -109,6 +109,17 @@ from wallet_api import create_wallet, UnifiedWallet
 from wallet_manager import HybridXRPManager, WalletInfo, CoreTrustlineInfo
 
 # ============================================================
+# IMPORT ADDRESS BOOK
+# ============================================================
+
+try:
+    from address_book import AddressBook
+    ADDRESS_BOOK_AVAILABLE = True
+except ImportError as e:
+    ADDRESS_BOOK_AVAILABLE = False
+    print(f"⚠️ Rubrica non disponibile: {e}")
+
+# ============================================================
 # IMPORT COMANDI XLM
 # ============================================================
 
@@ -171,6 +182,14 @@ class WalletBackend:
         # Password
         self._wallet_password = password
         self._password_verified = bool(password)
+        
+        # Address Book
+        self.address_book = None
+        if password and ADDRESS_BOOK_AVAILABLE:
+            try:
+                self.address_book = AddressBook(password)
+            except Exception as e:
+                print_yellow(f"⚠️ Errore inizializzazione rubrica: {e}")
         
         # Reticulum
         self.reticulum: Optional[ReticulumManager] = None
@@ -291,7 +310,6 @@ class WalletBackend:
         if self.metrics:
             self.metrics.set_use_internet(enabled)
         
-        # CORREZIONE QUI - usa l'icona giusta
         if enabled:
             print_green("🌐 Internet: ON")
         else:
@@ -618,19 +636,15 @@ class WalletBackend:
             
             normalized = []
             for tx in transactions:
-                # 🔥 SE HA TX_JSON, USA QUELLO (FORMATO XRP CORRETTO)
                 if "tx_json" in tx:
                     normalized.append(tx)
                     continue
                 
-                # Se ha _embedded.records (XLM), usalo
                 if tx.get('_embedded', {}).get('records'):
                     normalized.append(tx)
                     continue
                 
-                # Per XLM - formato Horizon (senza _embedded)
                 if crypto == "XLM":
-                    # Prendi SOLO i campi che esistono
                     tx_data = {
                         "created_at": tx.get('created_at', ''),
                         "type": tx.get('type', ''),
@@ -653,14 +667,9 @@ class WalletBackend:
                     }
                     normalized.append(tx_data)
                 else:
-                    # Per XRP - NON creare tx_json artificiale
-                    # Se la transazione è già nel formato AccountTx (con tx_json a livello root)
-                    # la usiamo così com'è
                     if "hash" in tx or "close_time_iso" in tx:
-                        # È già una transazione XRP, la passiamo come è
                         normalized.append(tx)
                     else:
-                        # Ultimo tentativo: usa i campi esistenti
                         normalized.append(tx)
             
             return {
@@ -1292,7 +1301,6 @@ class WalletBackend:
         
         manager = self.wallet._xrp_manager
         
-        # Crea wrapper per il comando
         class CliWrapper:
             def __init__(self, manager_instance, backend_instance):
                 self.wallet = type('obj', (object,), {'_xrp_manager': manager_instance})()
@@ -1315,10 +1323,8 @@ class WalletBackend:
                 command_func(wrapper)
             output = sys.stdout.getvalue()
             
-            # Determina successo
             success = "✅" in output and "❌" not in output
             
-            # Estrai hash
             tx_hash = ""
             if success:
                 import re
@@ -1349,7 +1355,6 @@ class WalletBackend:
         if memo_to_send and len(memo_to_send) > 1024:
             return {"success": False, "tx_hash": "", "message": "Memo too long (max 1024 chars)"}
         
-        # XLM - usa il comando send_xlm (che funziona)
         if crypto == "XLM":
             args = [to_address, str(amount)]
             if memo_to_send:
@@ -1359,7 +1364,6 @@ class WalletBackend:
             if success:
                 return {"success": True, "tx_hash": tx_hash, "message": "XLM sent"}
             else:
-                # Estrai messaggio di errore
                 error_msg = output.strip()
                 if "op_no_destination" in error_msg:
                     error_msg = "Indirizzo destinazione non valido. Verifica che l'indirizzo XLM sia corretto."
@@ -1369,7 +1373,6 @@ class WalletBackend:
                     error_msg = "Timeout nella connessione a Horizon. Riprova."
                 return {"success": False, "tx_hash": "", "message": error_msg}
         
-        # XRP - usa manager diretto
         else:
             return self._send_xrp(to_address, amount, memo_to_send)
 
@@ -1447,8 +1450,48 @@ class WalletBackend:
     # GET HISTORY - UNICO METODO CORRETTO!
     # ============================================================
     
+    def _extract_contacts_from_result(self, result: Dict[str, Any]):
+        """Estrae contatti dalle transazioni e aggiorna la rubrica"""
+        if not self.address_book:
+            return
+        
+        transactions = result.get("transactions", [])
+        crypto = result.get("crypto", "XRP")
+        
+        for tx in transactions:
+            try:
+                if crypto == "XLM":
+                    ops = tx.get('_embedded', {}).get('records', [])
+                    for op in ops:
+                        op_type = op.get('type', '')
+                        if op_type == 'payment':
+                            from_addr = op.get('from')
+                            to_addr = op.get('to')
+                            if from_addr:
+                                self.address_book.update_from_transaction(from_addr, "XLM")
+                            if to_addr:
+                                self.address_book.update_from_transaction(to_addr, "XLM")
+                        elif op_type == 'create_account':
+                            account = op.get('account')
+                            if account:
+                                self.address_book.update_from_transaction(account, "XLM")
+                else:
+                    tx_json = tx.get('tx_json', {})
+                    if tx_json:
+                        sender = tx_json.get('Account')
+                        destination = tx_json.get('Destination')
+                        if sender:
+                            self.address_book.update_from_transaction(sender, "XRP")
+                        if destination:
+                            self.address_book.update_from_transaction(destination, "XRP")
+            except Exception as e:
+                print(f"⚠️ Errore estrazione contatto: {e}")
+        
+        if self.address_book._modified:
+            self.address_book.save()
+    
     def get_history(self, limit: int = 10) -> Dict[str, Any]:
-        """Ottiene lo storico transazioni - XRP usa XRPL, XLM usa Horizon"""
+        """Ottiene lo storico transazioni e aggiorna la rubrica"""
         if not self.wallet or not self.wallet._xrp_manager:
             return {"success": False, "transactions": [], "count": 0, "message": "No wallet"}
         
@@ -1456,13 +1499,12 @@ class WalletBackend:
         manager = self.wallet._xrp_manager
         
         if not self.use_internet:
-            return self._get_history_reticulum(limit)
+            result = self._get_history_reticulum(limit)
+            self._extract_contacts_from_result(result)
+            return result
         
         crypto = manager.crypto_type
         
-        # ============================================================
-        # XLM - Horizon DIRETTO
-        # ============================================================
         if crypto == "XLM":
             try:
                 import requests
@@ -1478,7 +1520,6 @@ class WalletBackend:
                 data = response.json()
                 transactions = data.get('_embedded', {}).get('records', [])
                 
-                # Per ogni transazione, prendi le operations
                 for tx in transactions:
                     ops_url = f"{horizon_url}/transactions/{tx.get('hash')}/operations"
                     try:
@@ -1491,7 +1532,7 @@ class WalletBackend:
                     except:
                         tx['_embedded'] = {'records': []}
                 
-                return {
+                result = {
                     "success": True,
                     "transactions": transactions,
                     "count": len(transactions),
@@ -1500,12 +1541,12 @@ class WalletBackend:
                     "crypto": "XLM",
                     "message": "OK"
                 }
+                
+                self._extract_contacts_from_result(result)
+                return result
             except Exception as e:
                 return {"success": False, "transactions": [], "count": 0, "message": str(e)}
         
-        # ============================================================
-        # XRP - XRPL diretto
-        # ============================================================
         else:
             try:
                 from xrpl.models.requests import AccountTx
@@ -1533,7 +1574,7 @@ class WalletBackend:
                 
                 transactions = response.result.get("transactions", [])
                 
-                return {
+                result = {
                     "success": True,
                     "transactions": transactions,
                     "count": len(transactions),
@@ -1542,6 +1583,9 @@ class WalletBackend:
                     "crypto": "XRP",
                     "message": "OK"
                 }
+                
+                self._extract_contacts_from_result(result)
+                return result
             except Exception as e:
                 return {"success": False, "transactions": [], "count": 0, "message": str(e)}
 
@@ -1552,7 +1596,6 @@ class WalletBackend:
         
         manager = self.wallet._xrp_manager
         
-        # XLM - usa faucet_xlm
         if manager.crypto_type == "XLM":
             success, output, _ = self._run_xlm_command(faucet_xlm)
             if success:
@@ -1563,7 +1606,6 @@ class WalletBackend:
                     error_msg = "Errore Friendbot. Riprova più tardi."
                 return {"success": False, "message": error_msg}
         
-        # XRP - NO faucet automatico
         else:
             address = manager.get_address()
             return {
@@ -2109,6 +2151,110 @@ class WalletBackend:
             return {"success": False, "message": str(e)}
 
     # ============================================================
+    # RUBRICA - METODI PUBBLICI
+    # ============================================================
+
+    def get_contacts(self, sort_by: str = "name", search: str = None) -> Dict[str, Any]:
+        """Restituisce lista contatti"""
+        if not self.address_book:
+            return {"success": False, "contacts": [], "count": 0, "message": "Rubrica non disponibile"}
+        
+        try:
+            if search:
+                contacts = self.address_book.search(search)
+            else:
+                contacts = self.address_book.get_all_contacts(sort_by)
+            
+            return {
+                "success": True,
+                "contacts": contacts,
+                "count": len(contacts),
+                "stats": self.address_book.get_stats(),
+                "message": "OK"
+            }
+        except Exception as e:
+            return {"success": False, "contacts": [], "count": 0, "message": str(e)}
+
+    def get_contact(self, address: str) -> Dict[str, Any]:
+        """Restituisce un contatto specifico"""
+        if not self.address_book:
+            return {"success": False, "contact": None, "message": "Rubrica non disponibile"}
+        
+        try:
+            contact = self.address_book.get_contact(address)
+            if contact:
+                return {"success": True, "contact": contact, "message": "OK"}
+            return {"success": False, "contact": None, "message": "Contatto non trovato"}
+        except Exception as e:
+            return {"success": False, "contact": None, "message": str(e)}
+
+    def add_contact(self, address: str, name: str = None, crypto: str = None,
+                    network: str = None, tags: List[str] = None,
+                    notes: str = "", is_favorite: bool = False) -> Dict[str, Any]:
+        """Aggiunge o aggiorna un contatto manuale"""
+        if not self.address_book:
+            return {"success": False, "message": "Rubrica non disponibile"}
+        
+        try:
+            if not address:
+                return {"success": False, "message": "Indirizzo richiesto"}
+            
+            success = self.address_book.add_contact(
+                address, name, crypto, network, tags, notes, is_favorite
+            )
+            if success:
+                return {"success": True, "message": "Contatto salvato"}
+            return {"success": False, "message": "Errore salvataggio"}
+        except Exception as e:
+            return {"success": False, "message": str(e)}
+
+    def delete_contact(self, address: str) -> Dict[str, Any]:
+        """Elimina un contatto"""
+        if not self.address_book:
+            return {"success": False, "message": "Rubrica non disponibile"}
+        
+        try:
+            if self.address_book.delete_contact(address):
+                return {"success": True, "message": "Contatto eliminato"}
+            return {"success": False, "message": "Contatto non trovato"}
+        except Exception as e:
+            return {"success": False, "message": str(e)}
+
+    def toggle_favorite(self, address: str) -> Dict[str, Any]:
+        """Toggle preferito"""
+        if not self.address_book:
+            return {"success": False, "message": "Rubrica non disponibile"}
+        
+        try:
+            if self.address_book.toggle_favorite(address):
+                return {"success": True, "message": "Preferito aggiornato"}
+            return {"success": False, "message": "Contatto non trovato"}
+        except Exception as e:
+            return {"success": False, "message": str(e)}
+
+    def get_contact_addresses(self) -> Dict[str, Any]:
+        """Restituisce solo gli indirizzi per autocompletamento"""
+        if not self.address_book:
+            return {"success": False, "addresses": [], "message": "Rubrica non disponibile"}
+        
+        try:
+            addresses = self.address_book.get_addresses()
+            return {"success": True, "addresses": addresses, "count": len(addresses), "message": "OK"}
+        except Exception as e:
+            return {"success": False, "addresses": [], "count": 0, "message": str(e)}
+
+    def get_contact_stats(self) -> Dict[str, Any]:
+        """Statistiche rubrica"""
+        if not self.address_book:
+            return {"success": False, "stats": {}, "message": "Rubrica non disponibile"}
+        
+        try:
+            stats = self.address_book.get_stats()
+            return {"success": True, "stats": stats, "message": "OK"}
+        except Exception as e:
+            return {"success": False, "stats": {}, "message": str(e)}
+
+    # ============================================================
     # PASSWORD
     # ============================================================
     
@@ -2121,6 +2267,14 @@ class WalletBackend:
         self._wallet_password = new_password
         if self.wallet and self.wallet._xrp_manager:
             self.wallet._xrp_manager._wallet_password = new_password
+        
+        # Aggiorna password della rubrica
+        if self.address_book:
+            try:
+                self.address_book.password = new_password
+                self.address_book.save()
+            except Exception as e:
+                print_yellow(f"⚠️ Errore aggiornamento rubrica: {e}")
         
         wallets = self._get_wallet_list()
         for w in wallets:

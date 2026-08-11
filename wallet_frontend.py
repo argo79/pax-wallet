@@ -2,7 +2,7 @@
 """
 paxwallet.py - CLI Frontend per PAX Wallet
 Usa WalletBackend per TUTTA la logica
-Solo UI e menu - ~600 righe
+Solo UI e menu - con supporto rubrica
 """
 
 import sys
@@ -197,7 +197,8 @@ class PaxWalletCLI:
         print(" 10) Trustline")
         print(" 11) Invia token")
         print(" 12) Reticulum")
-        print(" 13) Cambia password")
+        print(" 13) Rubrica")
+        print(" 14) Cambia password")
         print("  0) Esci")
         
         if active.get("name"):
@@ -238,6 +239,8 @@ class PaxWalletCLI:
         elif choice == '12':
             self._menu_reticulum()
         elif choice == '13':
+            self._menu_address_book()
+        elif choice == '14':
             self._cmd_change_password()
         else:
             print_red("❌ Scelta non valida")
@@ -497,13 +500,11 @@ class PaxWalletCLI:
             return
 
         memo = input("Memo (opzionale): ").strip()
-        # 🔥 RIMOSSA LA DOMANDA "Cifrare il memo?"
-        encrypt = False  # Sempre in chiaro
+        encrypt = False
 
         if memo:
             print_yellow("ℹ️ Memo inviato in chiaro (non cifrato)")
 
-        # Controllo lunghezza memo (solo per XRP)
         if memo and len(memo) > 700 and self.backend.wallet._xrp_manager.crypto_type == "XRP":
             print_yellow("⚠️ Memo molto lungo (oltre 700 caratteri). Assicurati che sia sotto 1KB.")
             if not input("   Continuare? (s/N): ").strip().lower() == 's':
@@ -565,9 +566,6 @@ class PaxWalletCLI:
         
         result = self.backend.get_history(limit)
         
-        print(f"🔍 DEBUG: result.get('crypto') = {result.get('crypto')}")
-        print(f"🔍 DEBUG: result.get('count') = {result.get('count')}")
-        
         if not result.get("success"):
             print(f"❌ {result.get('message', 'Errore')}")
             return
@@ -586,7 +584,6 @@ class PaxWalletCLI:
         print("-" * 150)
         
         if crypto == "XLM":
-            print("🔍 DEBUG: Elaborazione XLM con formato Horizon")
             for idx, tx_data in enumerate(transactions, 1):
                 created_at = tx_data.get('created_at', '')
                 date_str = created_at.replace('T', ' ').replace('Z', '')[:19] if created_at else 'N/A'
@@ -598,7 +595,6 @@ class PaxWalletCLI:
                     op_type = op.get('type', '')
                     if op_type == 'payment':
                         amount_raw = op.get('amount', 0)
-                        # 🔥 GESTISCI STRINGA VUOTA
                         try:
                             if amount_raw == '' or amount_raw is None:
                                 amount = 0.0
@@ -676,7 +672,6 @@ class PaxWalletCLI:
                 print(f"{idx:<4} {date_str[:19]:<20} {direction:<12} {amount_str:<22} {fee_str:<12} {da_a:<70}")
         
         else:
-            print("🔍 DEBUG: Elaborazione XRP con formato XRPL")
             for idx, tx_data in enumerate(transactions, 1):
                 tx = tx_data.get("tx_json", {})
                 if not tx:
@@ -1269,118 +1264,109 @@ class PaxWalletCLI:
         print(f"Totale: {len(wallets)} wallet in cache")
         print("=" * 100)
     
-    def peer_metrics(self):
-        self.clear_output()
-        self.output("📊 PEER METRICHE")
-        self.show_status("⏳ Caricamento metriche...")
+    def _cmd_peer_metrics(self):
+        """Mostra metriche peer - VERSIONE CLI"""
+        result = self.backend.get_peer_metrics()
         
-        result = self.main.backend.get_peer_metrics()
-        if result.get("success"):
-            peers = result.get("peers", [])
-            stats = result.get("stats", {})
-            
-            if not peers:
-                self.output("❌ Nessun peer trovato")
-                self.show_status("Nessun peer trovato")
-                return
-            
-            if self.main.backend.use_tor:
-                self.output("🧅 TOR ON: gateway filtrati per TOR + Internet")
-            else:
-                self.output("🌐 TOR OFF: gateway filtrati per Internet")
-            
-            self.output(f"✅ Trovati {len(peers)} peer")
-            self.output("=" * 280)
-            self.output(f"{'#':<3} {'Nome':<22} {'Score':<6} {'Rel':<6} {'Rep':<4} {'Hops':<5} {'RTT':<8} {'XRP':<14} {'Stellar':<14} {'Internet':<9} {'TOR':<6} {'Ultimo visto':<15} {'ID':<36} {'Assets'}")
-            self.output("-" * 280)
-            
-            for idx, p in enumerate(peers, 1):
-                name = str(p.get('name', 'UNKNOWN'))[:16]
-                sc = round(p.get('_score', 0))
-                rel = round(p.get('reliability', 0), 2)
-                rep = p.get('reputation', 50)
-                hops = str(p.get('hops', '?'))
-                rtt = p.get('latency_ms')
-                rtt_str = f"{rtt:.0f}ms" if rtt is not None else "?ms"
-                
-                if p.get('xrp_reachable'):
-                    xrp_lat = p.get('xrp_latency_ms')
-                    xrp_str = f"✅{xrp_lat:.0f}ms" if xrp_lat is not None else "✅ OK"
-                else:
-                    xrp_str = "❌"
-                
-                if p.get('stellar_reachable'):
-                    stellar_lat = p.get('stellar_latency_ms')
-                    stellar_str = f"✅{stellar_lat:.0f}ms" if stellar_lat is not None else "✅ OK"
-                else:
-                    stellar_str = "❌"
-                
-                internet = "🌐" if p.get('has_internet') else "📡"
-                
-                tor_enabled = p.get('tor_enabled', False)
-                tor_reachable = p.get('tor_reachable', False)
-                if tor_enabled and tor_reachable:
-                    tor_str = "🧅✅"
-                elif tor_enabled:
-                    tor_str = "🧅❌"
-                else:
-                    tor_str = "—"
-                
-                last_seen = format_time_ago(p.get('last_seen'))
-                gw_id = p.get('gateway_id', 'N/A')[:36]
-                
-                assets = p.get('assets', [])
-                if isinstance(assets, list):
-                    assets_str = ', '.join(assets[:3])
-                    if len(assets) > 3:
-                        assets_str += f" +{len(assets)-3}"
-                else:
-                    assets_str = str(assets)[:20]
-                
-                text = f"{idx:<3} {name:<20} {sc:<6} {rel:<6} {rep:<4} {hops:<5} {rtt_str:<8} {xrp_str:<14} {stellar_str:<14} {internet:<9} {tor_str:<6} {last_seen:<15} {gw_id:<36} {assets_str}"
-                
-                item = QListWidgetItem(text)
-                item.setData(Qt.UserRole, {"type": "peer", "data": p})
-                self.output_list.addItem(item)
-            
-            self.output("=" * 280)
-            
-            if stats:
-                self.output(f"\n📊 Statistiche:")
-                self.output(f"   Totale peer: {stats.get('total_peers', 0)}")
-                if stats.get('online_peers', 0) > 0:
-                    self.output(f"   Online: {stats.get('online_peers', 0)}")
-                if stats.get('tor_peers', 0) > 0:
-                    self.output(f"   Gateway con TOR: {stats.get('tor_peers')}")
-                if stats.get('xrp_peers', 0) > 0:
-                    self.output(f"   Gateway con XRP: {stats.get('xrp_peers')}")
-                if stats.get('stellar_peers', 0) > 0:
-                    self.output(f"   Gateway con Stellar: {stats.get('stellar_peers')}")
-                if stats.get('avg_latency_ms', 0) > 0:
-                    self.output(f"   Latenza media: {round(stats.get('avg_latency_ms'), 0)}ms")
-            
-            if peers:
-                b = peers[0]
-                self.output(f"\n🏆 MIGLIOR PEER: {b.get('name', 'UNKNOWN')}")
-                self.output(f"   Hops: {b.get('hops', '?')} | RTT: {b.get('latency_ms', '?')}ms")
-                self.output(f"   XRP: {'✅' if b.get('xrp_reachable') else '❌'} ({b.get('xrp_latency_ms', '?')}ms)")
-                self.output(f"   Stellar: {'✅' if b.get('stellar_reachable') else '❌'} ({b.get('stellar_latency_ms', '?')}ms)")
-                self.output(f"   Internet: {'✅' if b.get('has_internet') else '❌'}")
-                tor_enabled = b.get('tor_enabled', False)
-                tor_reachable = b.get('tor_reachable', False)
-                if tor_enabled and tor_reachable:
-                    self.output(f"   TOR: ✅ Attivo e raggiungibile")
-                elif tor_enabled:
-                    self.output(f"   TOR: ⚠️ Attivo ma non raggiungibile")
-                else:
-                    self.output(f"   TOR: ❌ Non attivo")
-                if b.get('assets'):
-                    self.output(f"   Assets: {', '.join(b.get('assets', []))}")
-            
-            self.show_status(f"Trovati {len(peers)} peer")
+        if not result.get("success"):
+            print_red(f"❌ {result.get('message', 'Errore')}")
+            return
+        
+        peers = result.get("peers", [])
+        stats = result.get("stats", {})
+        
+        if not peers:
+            print_yellow("❌ Nessun peer trovato")
+            return
+        
+        if self.backend.use_tor:
+            print_blue("🧅 TOR ON: gateway filtrati per TOR + Internet")
         else:
-            self.output(f"❌ Errore: {result.get('message', 'Sconosciuto')}")
-            self.show_status(result.get("message", "Errore"), True)
+            print_green("🌐 TOR OFF: gateway filtrati per Internet")
+        
+        print_bold(f"\n📊 PEER METRICHE ({len(peers)} peer)")
+        print("=" * 280)
+        print(f"{'#':<3} {'Nome':<22} {'Score':<6} {'Rel':<6} {'Rep':<4} {'Hops':<5} {'RTT':<8} {'XRP':<14} {'Stellar':<14} {'Internet':<9} {'TOR':<6} {'Ultimo visto':<15} {'ID':<36} {'Assets'}")
+        print("-" * 280)
+        
+        for idx, p in enumerate(peers, 1):
+            name = str(p.get('name', 'UNKNOWN'))[:18]
+            sc = round(p.get('_score', 0))
+            rel = round(p.get('reliability', 0), 2)
+            rep = p.get('reputation', 50)
+            hops = str(p.get('hops', '?'))
+            rtt = p.get('latency_ms')
+            rtt_str = f"{rtt:.0f}ms" if rtt is not None else "?ms"
+            
+            if p.get('xrp_reachable'):
+                xrp_lat = p.get('xrp_latency_ms')
+                xrp_str = f"✅{xrp_lat:.0f}ms" if xrp_lat is not None else "✅ OK"
+            else:
+                xrp_str = "❌"
+            
+            if p.get('stellar_reachable'):
+                stellar_lat = p.get('stellar_latency_ms')
+                stellar_str = f"✅{stellar_lat:.0f}ms" if stellar_lat is not None else "✅ OK"
+            else:
+                stellar_str = "❌"
+            
+            internet = "🌐" if p.get('has_internet') else "📡"
+            
+            tor_enabled = p.get('tor_enabled', False)
+            tor_reachable = p.get('tor_reachable', False)
+            if tor_enabled and tor_reachable:
+                tor_str = "🧅✅"
+            elif tor_enabled:
+                tor_str = "🧅❌"
+            else:
+                tor_str = "—"
+            
+            last_seen = format_time_ago(p.get('last_seen'))
+            gw_id = p.get('gateway_id', 'N/A')[:36]
+            
+            assets = p.get('assets', [])
+            if isinstance(assets, list):
+                assets_str = ', '.join(assets[:3])
+                if len(assets) > 3:
+                    assets_str += f" +{len(assets)-3}"
+            else:
+                assets_str = str(assets)[:20]
+            
+            print(f"{idx:<3} {name:<20} {sc:<6} {rel:<6} {rep:<4} {hops:<5} {rtt_str:<8} {xrp_str:<14} {stellar_str:<14} {internet:<9} {tor_str:<6} {last_seen:<15} {gw_id:<36} {assets_str}")
+        
+        print("=" * 280)
+        
+        if stats:
+            print(f"\n📊 Statistiche:")
+            print(f"   Totale peer: {stats.get('total_peers', 0)}")
+            if stats.get('online_peers', 0) > 0:
+                print(f"   Online: {stats.get('online_peers', 0)}")
+            if stats.get('tor_peers', 0) > 0:
+                print(f"   Gateway con TOR: {stats.get('tor_peers')}")
+            if stats.get('xrp_peers', 0) > 0:
+                print(f"   Gateway con XRP: {stats.get('xrp_peers')}")
+            if stats.get('stellar_peers', 0) > 0:
+                print(f"   Gateway con Stellar: {stats.get('stellar_peers')}")
+            if stats.get('avg_latency_ms', 0) > 0:
+                print(f"   Latenza media: {round(stats.get('avg_latency_ms'), 0)}ms")
+        
+        if peers:
+            b = peers[0]
+            print_bold(f"\n🏆 MIGLIOR PEER: {b.get('name', 'UNKNOWN')}")
+            print(f"   Hops: {b.get('hops', '?')} | RTT: {b.get('latency_ms', '?')}ms")
+            print(f"   XRP: {'✅' if b.get('xrp_reachable') else '❌'} ({b.get('xrp_latency_ms', '?')}ms)")
+            print(f"   Stellar: {'✅' if b.get('stellar_reachable') else '❌'} ({b.get('stellar_latency_ms', '?')}ms)")
+            print(f"   Internet: {'✅' if b.get('has_internet') else '❌'}")
+            tor_enabled = b.get('tor_enabled', False)
+            tor_reachable = b.get('tor_reachable', False)
+            if tor_enabled and tor_reachable:
+                print(f"   TOR: ✅ Attivo e raggiungibile")
+            elif tor_enabled:
+                print(f"   TOR: ⚠️ Attivo ma non raggiungibile")
+            else:
+                print(f"   TOR: ❌ Non attivo")
+            if b.get('assets'):
+                print(f"   Assets: {', '.join(b.get('assets', []))}")
     
     def _cmd_best_gateway(self):
         """Miglior gateway - MOSTRA TUTTE LE INFO"""
@@ -1655,6 +1641,336 @@ class PaxWalletCLI:
                 print_green("✅ TOR raggiungibile e funzionante")
             else:
                 print_yellow("⚠️ TOR non risponde. Controlla il demone.")
+
+    # ============================================================
+    # RUBRICA
+    # ============================================================
+    
+    def _menu_address_book(self):
+        """Sottomenu rubrica"""
+        while True:
+            # Mostra statistiche
+            stats_result = self.backend.get_contact_stats()
+            stats = stats_result.get("stats", {}) if stats_result.get("success") else {}
+            
+            print("\n" + "=" * 50)
+            print("  📇 RUBRICA INDIRIZZI")
+            print("=" * 50)
+            print(f"  Totale contatti: {stats.get('total', 0)}")
+            print(f"  Manuali: {stats.get('manual', 0)} | Automatici: {stats.get('auto', 0)}")
+            print(f"  Preferiti: {stats.get('favorites', 0)}")
+            print(f"  XRP: {stats.get('xrp', 0)} | XLM: {stats.get('xlm', 0)}")
+            print("")
+            
+            print("  1) Lista contatti")
+            print("  2) Cerca contatto")
+            print("  3) Aggiungi contatto")
+            print("  4) Modifica contatto")
+            print("  5) Elimina contatto")
+            print("  6) Toggle preferito")
+            print("  0) Torna al menu principale")
+            print("-" * 50)
+            
+            sub = input("\nScelta: ").strip()
+            
+            if sub == '0':
+                break
+            elif sub == '1':
+                self._cmd_list_contacts()
+            elif sub == '2':
+                self._cmd_search_contacts()
+            elif sub == '3':
+                self._cmd_add_contact()
+            elif sub == '4':
+                self._cmd_edit_contact()
+            elif sub == '5':
+                self._cmd_delete_contact()
+            elif sub == '6':
+                self._cmd_toggle_favorite()
+            else:
+                print_red("❌ Scelta non valida")
+    
+    def _cmd_list_contacts(self):
+        """Lista tutti i contatti"""
+        sort_by = input("Ordina per (name/last_used/tx_count) [name]: ").strip() or "name"
+        
+        result = self.backend.get_contacts(sort_by=sort_by)
+        
+        if not result.get("success"):
+            print_red(f"❌ {result.get('message', 'Errore')}")
+            return
+        
+        contacts = result.get("contacts", [])
+        
+        if not contacts:
+            print_yellow("📭 Nessun contatto in rubrica")
+            return
+        
+        print_bold(f"\n📇 RUBRICA ({len(contacts)} contatti)")
+        print("=" * 140)
+        print(f"{'#':<4} {'⭐':<3} {'Nome':<22} {'Indirizzo':<40} {'Crypto':<6} {'Tipo':<8} {'TX':<6} {'Ultimo uso'}")
+        print("-" * 140)
+        
+        for i, c in enumerate(contacts, 1):
+            star = "⭐" if c.get("is_favorite") else " "
+            name = c.get("name", "N/A")[:20]
+            address = c.get("address", "N/A")[:38]
+            crypto = c.get("crypto", "XRP")
+            source = c.get("source", "auto")[:6]
+            tx_count = c.get("tx_count", 0)
+            last_used = c.get("last_used", 0)
+            last_str = format_time_ago(last_used) if last_used else "Mai"
+            
+            print(f"{i:<4} {star:<3} {name:<22} {address:<40} {crypto:<6} {source:<8} {tx_count:<6} {last_str}")
+        
+        print("=" * 140)
+        print(f"Totale: {len(contacts)} contatti")
+    
+    def _cmd_search_contacts(self):
+        """Cerca contatti"""
+        query = input("Cerca (nome o indirizzo): ").strip()
+        if not query:
+            print_yellow("❌ Inserisci un termine di ricerca")
+            return
+        
+        result = self.backend.get_contacts(search=query)
+        
+        if not result.get("success"):
+            print_red(f"❌ {result.get('message', 'Errore')}")
+            return
+        
+        contacts = result.get("contacts", [])
+        
+        if not contacts:
+            print_yellow(f"📭 Nessun contatto trovato per '{query}'")
+            return
+        
+        print_bold(f"\n🔍 RISULTATI PER '{query}' ({len(contacts)} contatti)")
+        print("=" * 140)
+        print(f"{'#':<4} {'⭐':<3} {'Nome':<22} {'Indirizzo':<40} {'Crypto':<6} {'Tipo':<8} {'TX':<6} {'Ultimo uso'}")
+        print("-" * 140)
+        
+        for i, c in enumerate(contacts, 1):
+            star = "⭐" if c.get("is_favorite") else " "
+            name = c.get("name", "N/A")[:20]
+            address = c.get("address", "N/A")[:38]
+            crypto = c.get("crypto", "XRP")
+            source = c.get("source", "auto")[:6]
+            tx_count = c.get("tx_count", 0)
+            last_used = c.get("last_used", 0)
+            last_str = format_time_ago(last_used) if last_used else "Mai"
+            
+            print(f"{i:<4} {star:<3} {name:<22} {address:<40} {crypto:<6} {source:<8} {tx_count:<6} {last_str}")
+        
+        print("=" * 140)
+    
+    def _cmd_add_contact(self):
+        """Aggiungi contatto manuale"""
+        address = input("Indirizzo: ").strip()
+        if not address:
+            print_red("❌ Indirizzo obbligatorio")
+            return
+        
+        # Verifica se esiste già
+        existing = self.backend.get_contact(address)
+        if existing.get("success") and existing.get("contact"):
+            print_yellow(f"⚠️ Contatto già esistente: {existing['contact'].get('name')}")
+            overwrite = input("   Sovrascrivere? (s/N): ").strip().lower()
+            if overwrite != 's':
+                return
+        
+        name = input("Nome: ").strip()
+        if not name:
+            name = address[:12]
+        
+        crypto = input("Crypto (XRP/XLM) [XRP]: ").strip().upper() or "XRP"
+        network = input("Network (mainnet/testnet) [mainnet]: ").strip().lower() or "mainnet"
+        tags = input("Tags (separati da virgola): ").strip()
+        tags_list = [t.strip() for t in tags.split(",")] if tags else []
+        notes = input("Note: ").strip()
+        is_favorite = input("Preferito? (s/N): ").strip().lower() == 's'
+        
+        result = self.backend.add_contact(address, name, crypto, network, tags_list, notes, is_favorite)
+        
+        if result.get("success"):
+            print_green(f"✅ Contatto '{name}' aggiunto!")
+        else:
+            print_red(f"❌ {result.get('message', 'Errore')}")
+    
+    def _cmd_edit_contact(self):
+        """Modifica contatto"""
+        # Prima lista contatti
+        result = self.backend.get_contacts()
+        if not result.get("success"):
+            print_red(f"❌ {result.get('message', 'Errore')}")
+            return
+        
+        contacts = result.get("contacts", [])
+        if not contacts:
+            print_yellow("📭 Nessun contatto in rubrica")
+            return
+        
+        print_bold("\n📇 SELEZIONA CONTATTO DA MODIFICARE")
+        print("=" * 120)
+        print(f"{'#':<4} {'Nome':<22} {'Indirizzo':<40} {'Crypto':<6} {'Tipo':<8}")
+        print("-" * 120)
+        
+        for i, c in enumerate(contacts, 1):
+            name = c.get("name", "N/A")[:20]
+            address = c.get("address", "N/A")[:38]
+            crypto = c.get("crypto", "XRP")
+            source = c.get("source", "auto")[:6]
+            print(f"{i:<4} {name:<22} {address:<40} {crypto:<6} {source:<8}")
+        
+        print("=" * 120)
+        
+        choice = input("\nNumero contatto (o Invio): ").strip()
+        if not choice or not choice.isdigit():
+            return
+        
+        idx = int(choice) - 1
+        if idx < 0 or idx >= len(contacts):
+            print_red("❌ Numero non valido")
+            return
+        
+        contact = contacts[idx]
+        address = contact.get("address")
+        
+        print(f"\n📝 MODIFICA CONTATTO: {contact.get('name')}")
+        print("-" * 40)
+        
+        name = input(f"Nome [{contact.get('name')}]: ").strip()
+        if not name:
+            name = contact.get('name')
+        
+        crypto = input(f"Crypto (XRP/XLM) [{contact.get('crypto')}]: ").strip().upper()
+        if not crypto:
+            crypto = contact.get('crypto')
+        
+        tags_input = input(f"Tags [{', '.join(contact.get('tags', []))}]: ").strip()
+        tags_list = [t.strip() for t in tags_input.split(",")] if tags_input else contact.get('tags', [])
+        
+        notes = input(f"Note [{contact.get('notes', '')}]: ").strip()
+        if not notes:
+            notes = contact.get('notes', '')
+        
+        is_favorite = contact.get('is_favorite', False)
+        fav_input = input(f"Preferito? (s/N) [{ 'S' if is_favorite else 'N'}]: ").strip().lower()
+        if fav_input == 's':
+            is_favorite = True
+        elif fav_input == 'n':
+            is_favorite = False
+        
+        result = self.backend.add_contact(address, name, crypto, None, tags_list, notes, is_favorite)
+        
+        if result.get("success"):
+            print_green(f"✅ Contatto '{name}' aggiornato!")
+        else:
+            print_red(f"❌ {result.get('message', 'Errore')}")
+    
+    def _cmd_delete_contact(self):
+        """Elimina contatto"""
+        # Prima lista contatti
+        result = self.backend.get_contacts()
+        if not result.get("success"):
+            print_red(f"❌ {result.get('message', 'Errore')}")
+            return
+        
+        contacts = result.get("contacts", [])
+        if not contacts:
+            print_yellow("📭 Nessun contatto in rubrica")
+            return
+        
+        print_bold("\n🗑️ SELEZIONA CONTATTO DA ELIMINARE")
+        print("=" * 120)
+        print(f"{'#':<4} {'Nome':<22} {'Indirizzo':<40} {'Crypto':<6} {'Tipo':<8}")
+        print("-" * 120)
+        
+        for i, c in enumerate(contacts, 1):
+            name = c.get("name", "N/A")[:20]
+            address = c.get("address", "N/A")[:38]
+            crypto = c.get("crypto", "XRP")
+            source = c.get("source", "auto")[:6]
+            print(f"{i:<4} {name:<22} {address:<40} {crypto:<6} {source:<8}")
+        
+        print("=" * 120)
+        
+        choice = input("\nNumero contatto da eliminare (o Invio): ").strip()
+        if not choice or not choice.isdigit():
+            return
+        
+        idx = int(choice) - 1
+        if idx < 0 or idx >= len(contacts):
+            print_red("❌ Numero non valido")
+            return
+        
+        contact = contacts[idx]
+        address = contact.get("address")
+        name = contact.get("name")
+        
+        print(f"\n⚠️ Stai per eliminare: {name} ({address[:16]}...)")
+        confirm = input("   Confermi? (s/N): ").strip().lower()
+        if confirm != 's':
+            print_yellow("❌ Operazione annullata")
+            return
+        
+        result = self.backend.delete_contact(address)
+        
+        if result.get("success"):
+            print_green(f"✅ Contatto '{name}' eliminato!")
+        else:
+            print_red(f"❌ {result.get('message', 'Errore')}")
+    
+    def _cmd_toggle_favorite(self):
+        """Toggle preferito per un contatto"""
+        # Prima lista contatti
+        result = self.backend.get_contacts()
+        if not result.get("success"):
+            print_red(f"❌ {result.get('message', 'Errore')}")
+            return
+        
+        contacts = result.get("contacts", [])
+        if not contacts:
+            print_yellow("📭 Nessun contatto in rubrica")
+            return
+        
+        print_bold("\n⭐ TOGGLE PREFERITO")
+        print("=" * 120)
+        print(f"{'#':<4} {'⭐':<3} {'Nome':<22} {'Indirizzo':<40} {'Crypto':<6}")
+        print("-" * 120)
+        
+        for i, c in enumerate(contacts, 1):
+            star = "⭐" if c.get("is_favorite") else " "
+            name = c.get("name", "N/A")[:20]
+            address = c.get("address", "N/A")[:38]
+            crypto = c.get("crypto", "XRP")
+            print(f"{i:<4} {star:<3} {name:<22} {address:<40} {crypto:<6}")
+        
+        print("=" * 120)
+        
+        choice = input("\nNumero contatto (o Invio): ").strip()
+        if not choice or not choice.isdigit():
+            return
+        
+        idx = int(choice) - 1
+        if idx < 0 or idx >= len(contacts):
+            print_red("❌ Numero non valido")
+            return
+        
+        contact = contacts[idx]
+        address = contact.get("address")
+        name = contact.get("name")
+        
+        result = self.backend.toggle_favorite(address)
+        
+        if result.get("success"):
+            new_status = not contact.get("is_favorite", False)
+            if new_status:
+                print_green(f"⭐ '{name}' aggiunto ai preferiti!")
+            else:
+                print_yellow(f"⭐ '{name}' rimosso dai preferiti")
+        else:
+            print_red(f"❌ {result.get('message', 'Errore')}")
 
 # ============================================================
 # MAIN

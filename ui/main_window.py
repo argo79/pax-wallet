@@ -17,6 +17,7 @@ from PySide6.QtGui import *
 from wallet_backend import WalletBackend, create_backend, VERSION, format_time_ago
 from .base_view import ListViewWithDetail
 from .reticulum_view import ReticulumView
+from .address_book_view import AddressBookView
 
 # ============================================================
 # WIDGET BASE: ListViewWithDetail
@@ -74,16 +75,18 @@ class MainWindow(QMainWindow):
         self.dashboard_view = DashboardView(self)
         self.send_view = SendView(self)
         self.history_view = HistoryView(self)
+        self.address_book_view = AddressBookView(self)
         self.wallet_view = WalletView(self)
         self.reticulum_view = ReticulumView(self)
         self.settings_view = SettingsView(self)
         
-        self.content_stack.addWidget(self.dashboard_view)
-        self.content_stack.addWidget(self.send_view)
-        self.content_stack.addWidget(self.history_view)
-        self.content_stack.addWidget(self.wallet_view)
-        self.content_stack.addWidget(self.reticulum_view)
-        self.content_stack.addWidget(self.settings_view)
+        self.content_stack.addWidget(self.dashboard_view)       # 0
+        self.content_stack.addWidget(self.send_view)            # 1
+        self.content_stack.addWidget(self.history_view)         # 2
+        self.content_stack.addWidget(self.address_book_view)    # 3
+        self.content_stack.addWidget(self.wallet_view)          # 4
+        self.content_stack.addWidget(self.reticulum_view)       # 5
+        self.content_stack.addWidget(self.settings_view)        # 6
         
         self.content_stack.setCurrentIndex(0)
         self.highlight_sidebar(0)
@@ -120,9 +123,10 @@ class MainWindow(QMainWindow):
             ("◈ Dashboard", 0),
             ("◈ Invia", 1),
             ("◈ Storico", 2),
-            ("◈ Wallet", 3),
-            ("◈ Reticulum", 4),
-            ("◈ Impostazioni", 5),
+            ("◈ Rubrica", 3),
+            ("◈ Wallet", 4),
+            ("◈ Reticulum", 5),
+            ("◈ Impostazioni", 6),
         ]
         
         self.nav_buttons = []
@@ -147,10 +151,17 @@ class MainWindow(QMainWindow):
         self.content_stack.setCurrentIndex(index)
         self.highlight_sidebar(index)
         
-        # Aggiorna reticulum view quando viene selezionata
-        if index == 4 and hasattr(self, 'reticulum_view'):
+        # Aggiorna reticulum view quando viene selezionata (indice 5)
+        if index == 5 and hasattr(self, 'reticulum_view'):
             try:
                 self.reticulum_view.update_status()
+            except:
+                pass
+        
+        # Aggiorna rubrica quando viene selezionata (indice 3)
+        if index == 3 and hasattr(self, 'address_book_view'):
+            try:
+                self.address_book_view.refresh_contacts()
             except:
                 pass
     
@@ -188,6 +199,16 @@ class MainWindow(QMainWindow):
             self.send_view.amount_input.clear()
             self.send_view.memo_input.clear()
             self.send_view.status_label.setText("🔄 Wallet cambiato")
+        
+        # Resetta Rubrica
+        if hasattr(self, 'address_book_view'):
+            self.address_book_view.contacts = []
+            self.address_book_view.contact_list.clear()
+            self.address_book_view.contact_list.addItem("🔄 Premi 'AGGIORNA' per caricare")
+            self.address_book_view.clear_detail()
+            self.address_book_view.count_label.setText("")
+            self.address_book_view.search_input.clear()
+            self.address_book_view.sort_combo.setCurrentText("Nome")
         
         # Resetta Reticulum
         if hasattr(self, 'reticulum_view'):
@@ -418,7 +439,8 @@ class DashboardView(QWidget):
         for text, index in [
             ("◈ INVIA", 1),
             ("◈ STORICO", 2),
-            ("◈ WALLET", 3),
+            ("◈ RUBRICA", 3),
+            ("◈ WALLET", 4),
         ]:
             btn = QPushButton(text)
             btn.setObjectName("quick_action")
@@ -1199,7 +1221,7 @@ class SendView(QWidget):
         try:
             result = self.main.backend.send_payment(address, amount, memo, encrypt_memo=encrypt)
             if result.get("success"):
-                self.status_label.setText(f"✅ > SENT! HASH: {result.get('tx_hash', 'N/A')[:16]}...")
+                self.status_label.setText(f"✅ > SENT! HASH: {result.get('tx_hash', 'N/A')}")
                 self.address_input.clear()
                 self.amount_input.clear()
                 self.memo_input.clear()

@@ -39,6 +39,8 @@ class ListViewWithDetail(QWidget):
 
         self.detail_title = QLabel("📋 DETTAGLIO")
         self.detail_title.setObjectName("detail_title")
+        self.detail_title.setFixedHeight(20)  # 🔥 FORZA ALTEZZA A 20 PIXEL!
+        self.detail_title.setStyleSheet("padding: 0px; margin: 0px; font-size: 11px;")
         self.detail_layout.addWidget(self.detail_title)
 
         self.detail_text = QTextEdit()
