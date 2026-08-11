@@ -38,10 +38,7 @@ class MainWindow(QMainWindow):
         # Impostazioni per skin e lingua
         self.settings = QSettings("HOPE", "PAX Wallet")
         
-        # Timer per aggiornare info rete
-        self.network_timer = QTimer()
-        self.network_timer.timeout.connect(self.update_network_status)
-        self.network_timer.start(10000)  # Ogni 10 secondi
+        # NESSUN TIMER - NESSUNA RICHIESTA AUTOMATICA!
         
         self.show_unlock()
     
@@ -54,6 +51,10 @@ class MainWindow(QMainWindow):
         self.backend = backend
         self._password = password
         self.setup_main_ui()
+        
+        # Aggiorna subito lo stato reticulum
+        if hasattr(self, 'reticulum_view'):
+            self.reticulum_view.update_status()
     
     def setup_main_ui(self):
         central = QWidget()
@@ -145,6 +146,13 @@ class MainWindow(QMainWindow):
     def switch_view(self, index):
         self.content_stack.setCurrentIndex(index)
         self.highlight_sidebar(index)
+        
+        # Aggiorna reticulum view quando viene selezionata
+        if index == 4 and hasattr(self, 'reticulum_view'):
+            try:
+                self.reticulum_view.update_status()
+            except:
+                pass
     
     def highlight_sidebar(self, index):
         for i, btn in enumerate(self.nav_buttons):
@@ -257,17 +265,32 @@ class MainWindow(QMainWindow):
             self.balance_label.setText(f"⚠️ Errore: {str(e)[:20]}")
     
     def update_network_status(self):
-        """Aggiorna lo stato di rete nella UI"""
+        """Aggiorna lo stato di rete nella UI - chiamato solo manualmente"""
         if not self.backend:
             return
         
         # Aggiorna reticulum view se esiste
         if hasattr(self, 'reticulum_view'):
             try:
-                # ReticulumView usa update_status() per aggiornare tutto
                 self.reticulum_view.update_status()
             except Exception as e:
                 print(f"Errore update_network_status: {e}")
+
+    def closeEvent(self, event):
+        """Gestisce la chiusura della finestra con la X"""
+        # Pulisci tutto prima di uscire
+        self.reset_all_views()
+        
+        # Cancella il file di cache delle transazioni
+        try:
+            cache_file = Path("xrp_data.json")
+            if cache_file.exists():
+                cache_file.unlink()
+                print("🧹 Cache transazioni cancellata")
+        except Exception as e:
+            print(f"⚠️ Errore cancellazione cache: {e}")
+        
+        event.accept()
 
 
 # ============================================================
@@ -409,7 +432,7 @@ class DashboardView(QWidget):
         
         self.tx_list = QListWidget()
         self.tx_list.setObjectName("tx_list")
-        self.tx_list.addItem("Premi 'AGGIORNA' per caricare")
+        self.tx_list.addItem("🔄 Premi 'AGGIORNA' per caricare")
         layout.addWidget(self.tx_list)
         
         layout.addStretch()
@@ -647,6 +670,17 @@ class DashboardView(QWidget):
             QMessageBox.No
         )
         if reply == QMessageBox.Yes:
+            # Pulisci tutto prima di uscire
+            self.main.reset_all_views()
+            
+            # Cancella il file di cache
+            try:
+                cache_file = Path("xrp_data.json")
+                if cache_file.exists():
+                    cache_file.unlink()
+            except:
+                pass
+            
             self.main.close()
 
 
@@ -665,7 +699,7 @@ class HistoryView(ListViewWithDetail):
         self.filter_direction = "TUTTI"
         self.setup_controls()
         self.setup_list()
-        self.refresh_history()
+        # NON chiamare refresh_history() all'avvio!
 
     def setup_controls(self):
         layout = self.controls_layout
@@ -721,6 +755,8 @@ class HistoryView(ListViewWithDetail):
         self.tx_list.itemClicked.connect(self.on_item_clicked)
         self.tx_list.setAlternatingRowColors(True)
         self.output_layout.addWidget(self.tx_list)
+        # Messaggio iniziale che invita a cliccare su AGGIORNA
+        self.tx_list.addItem("🔄 Premi 'AGGIORNA' per caricare lo storico")
 
     def refresh_history(self):
         if not self.main.backend:
@@ -1568,6 +1604,7 @@ class SettingsView(QWidget):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+        scroll.setMinimumHeight(600)
         
         scroll_widget = QWidget()
         scroll_layout = QVBoxLayout(scroll_widget)
@@ -1773,7 +1810,8 @@ class SettingsView(QWidget):
         self.config_display = QTextEdit()
         self.config_display.setReadOnly(True)
         self.config_display.setFont(QFont("Courier New", 9))
-        self.config_display.setMaximumHeight(150)
+        self.config_display.setMinimumHeight(200)
+        self.config_display.setMaximumHeight(400)
         scroll_layout.addWidget(self.config_display)
         
         scroll_layout.addStretch()
@@ -1904,6 +1942,10 @@ class SettingsView(QWidget):
         self.main.backend.set_use_internet(not current)
         self.update_network_status()
         self.status_label.setText("🌐 Internet " + ("attivato" if not current else "disattivato"))
+        
+        # Aggiorna subito il reticulum view
+        if hasattr(self.main, 'reticulum_view'):
+            self.main.reticulum_view.update_status()
     
     def toggle_tor(self):
         if not self.main.backend:
@@ -1912,6 +1954,10 @@ class SettingsView(QWidget):
         self.main.backend.set_use_tor(not current)
         self.update_network_status()
         self.status_label.setText("🧅 TOR " + ("attivato" if not current else "disattivato"))
+        
+        # Aggiorna subito il reticulum view
+        if hasattr(self.main, 'reticulum_view'):
+            self.main.reticulum_view.update_status()
     
     def set_tor_port(self):
         if not self.main.backend:
@@ -1921,6 +1967,10 @@ class SettingsView(QWidget):
             self.main.backend.tor_socks_port = port
             self.main.backend._update_proxy()
             self.status_label.setText(f"✅ TOR port impostato a {port}")
+            
+            # Aggiorna subito il reticulum view
+            if hasattr(self.main, 'reticulum_view'):
+                self.main.reticulum_view.update_status()
         except ValueError:
             self.status_label.setText("❌ Porta non valida")
     
