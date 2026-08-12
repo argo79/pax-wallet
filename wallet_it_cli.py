@@ -2,7 +2,7 @@
 """
 paxwallet.py - CLI Frontend per PAX Wallet
 Usa WalletBackend per TUTTA la logica
-Solo UI e menu - ~600 righe
+Solo UI e menu - con supporto rubrica
 """
 
 import sys
@@ -90,18 +90,15 @@ class PaxWalletCLI:
                     attempts += 1
                     continue
                 
-                # 🔥 PROVA A INIZIALIZZARE CON QUESTA PASSWORD
                 self.backend = create_backend(password)
                 result = self.backend.init()
                 
-                # Verifica se il wallet è stato caricato correttamente
                 active = self.backend.get_active_wallet()
                 if active.get("name") and active.get("loaded"):
                     self._password = password
                     print_green("✅ Password verificata")
                     return True
                 
-                # Se arriva qui, la password è sbagliata
                 attempts += 1
                 remaining = max_attempts - attempts
                 print_red(f"❌ Password errata. Tentativi rimasti: {remaining}")
@@ -200,7 +197,8 @@ class PaxWalletCLI:
         print(" 10) Trustline")
         print(" 11) Invia token")
         print(" 12) Reticulum")
-        print(" 13) Cambia password")
+        print(" 13) Rubrica")
+        print(" 14) Cambia password")
         print("  0) Esci")
         
         if active.get("name"):
@@ -241,6 +239,8 @@ class PaxWalletCLI:
         elif choice == '12':
             self._menu_reticulum()
         elif choice == '13':
+            self._menu_address_book()
+        elif choice == '14':
             self._cmd_change_password()
         else:
             print_red("❌ Scelta non valida")
@@ -264,7 +264,6 @@ class PaxWalletCLI:
                 for i, w in enumerate(wallets, 1):
                     marker = "▶" if w.get("is_active") else " "
                     address = w.get("address", "unknown")
-                    # 🔥 NON TRONCARE! Mostra l'indirizzo COMPLETO
                     print(f"    {i}. {marker} {w['name']:<15} ({w['crypto']} - {w['network']}) {address}")
             else:
                 print("    ❌ Nessun wallet salvato")
@@ -320,7 +319,6 @@ class PaxWalletCLI:
         else:
             print_yellow("   ⚠️ Nessuna passphrase")
         
-        # 🔥 PASSA strength E passphrase AL BACKEND
         result = self.backend.create_wallet(name, crypto, network, strength=strength, passphrase=passphrase)
         
         if result.get("success"):
@@ -343,7 +341,6 @@ class PaxWalletCLI:
         if not seed:
             return
         
-        # 🔥 RILEVA SE È UNA MNEMONICA
         words = seed.strip().split()
         is_mnemonic = len(words) in [12, 24] and all(w.isalpha() for w in words)
         
@@ -361,7 +358,6 @@ class PaxWalletCLI:
         crypto = input("Crypto (auto/XRP/XLM): ").strip().upper() or "auto"
         network = input("Rete (testnet/mainnet): ").strip().lower() or "testnet"
         
-        # 🔥 PASSA LA PASSPHRASE AL BACKEND
         result = self.backend.import_wallet(seed, name, crypto, network, passphrase=passphrase)
         if result.get("success"):
             print_green(f"\n✅ Wallet importato!")
@@ -413,7 +409,6 @@ class PaxWalletCLI:
         for i, w in enumerate(wallets, 1):
             marker = "▶" if w.get("is_active") else " "
             address = w.get("address", "unknown")
-            # 🔥 INDIRIZZO COMPLETO
             print(f"  {i}. {marker} {w['name']} ({w['crypto']} - {w['network']}) {address}")
         
         choice = input("\nNumero wallet (o Invio): ").strip()
@@ -470,7 +465,6 @@ class PaxWalletCLI:
         print_bold(f"\n📤 INDIRIZZI DERIVATI ({keyword}: 0-{len(addresses)-1})")
         print("=" * 120)
         
-        # Intestazione tabella
         print(f"{'#':<6} {'Indirizzo':<40} {'Private Key':<35} {'Public Key'}")
         print("-" * 120)
         
@@ -480,7 +474,6 @@ class PaxWalletCLI:
             priv = addr.get("private_key", "")
             pub = addr.get("public_key", "")
             
-            # Tronca le chiavi se troppo lunghe
             priv_display = priv[:30] + "..." if len(priv) > 33 else priv
             pub_display = pub[:30] + "..." if len(pub) > 33 else pub
             
@@ -491,28 +484,49 @@ class PaxWalletCLI:
         print("=" * 120)
     
     def _cmd_send(self):
-        """Invia pagamento"""
+        """Invia pagamento XRP/XLM con memo in chiaro"""
         to_addr = input("Indirizzo destinatario: ").strip()
         if not to_addr:
+            print_red("❌ Indirizzo destinatario obbligatorio")
             return
+
         try:
             amount = float(input("Ammontare: ").strip())
+            if amount <= 0:
+                print_red("❌ L'ammontare deve essere maggiore di zero")
+                return
         except ValueError:
-            print_red("❌ Ammontare non valido")
+            print_red("❌ Ammontare non valido (usa il punto come separatore decimale)")
             return
+
         memo = input("Memo (opzionale): ").strip()
-        
-        result = self.backend.send_payment(to_addr, amount, memo)
-        
-        # 🔥 SE È VIA RETICULUM, MOSTRA IN BLU
+        encrypt = False
+
+        if memo:
+            print_yellow("ℹ️ Memo inviato in chiaro (non cifrato)")
+
+        if memo and len(memo) > 700 and self.backend.wallet._xrp_manager.crypto_type == "XRP":
+            print_yellow("⚠️ Memo molto lungo (oltre 700 caratteri). Assicurati che sia sotto 1KB.")
+            if not input("   Continuare? (s/N): ").strip().lower() == 's':
+                return
+
+        result = self.backend.send_payment(to_addr, amount, memo, encrypt_memo=encrypt)
+
         if result.get("via_reticulum", False):
             print_blue(f"📡 Richiesta transazione via Reticulum")
-        
+
         if result.get("success"):
             print_green(f"✅ Pagamento inviato!")
             print(f"   Hash: {result.get('tx_hash', 'N/A')}")
+            if result.get("tx_hash"):
+                network = self.backend.wallet._xrp_manager.network
+                if network == "mainnet":
+                    explorer = f"https://xrpscan.com/tx/{result['tx_hash']}"
+                else:
+                    explorer = f"https://testnet.xrpl.org/transactions/{result['tx_hash']}"
+                print(f"   🔗 {explorer}")
         else:
-            print_red(f"❌ {result.get('message', 'Errore')}")
+            print_red(f"❌ {result.get('message', 'Errore sconosciuto')}")
     
     def _cmd_info(self):
         """Info wallet - SOLO DATI PUBBLICI"""
@@ -528,8 +542,6 @@ class PaxWalletCLI:
             if result.get('balance') is not None:
                 print(f"   Balance:    {result.get('balance', 0):.6f} {result.get('crypto', 'XRP')}")
             
-            # 🔥 MOSTRA SOLO DATI PUBBLICI - NIENTE CHIAVI!
-            # Solo info sui wallet derivati (pubblici)
             if result.get('derived_wallets'):
                 print(f"\n   📂 Wallet derivati: {len(result.get('derived_wallets', []))}")
                 for w in result.get('derived_wallets', [])[:5]:
@@ -539,34 +551,218 @@ class PaxWalletCLI:
         else:
             print_red(f"❌ {result.get('message', 'Errore')}")
     
-    def _cmd_history(self):
-        """Storico transazioni - FORMATTA E STAMPA"""
-        limit = int(input("Numero transazioni (10): ").strip() or "10")
+    def _cmd_history(self, args=None):
+        """Mostra storico transazioni - supporta XRP e XLM"""
+        if not self.backend:
+            print("❌ Backend non inizializzato")
+            return
+        
+        limit = 10
+        if args and len(args) > 0:
+            try:
+                limit = int(args[0])
+            except:
+                pass
+        
         result = self.backend.get_history(limit)
         
         if not result.get("success"):
-            print_red(f"❌ {result.get('message', 'Errore')}")
+            print(f"❌ {result.get('message', 'Errore')}")
             return
         
         transactions = result.get("transactions", [])
+        crypto = result.get("crypto", "XRP")
         address = result.get("address", "")
         
         if not transactions:
-            print_yellow("❌ Nessuna transazione trovata.")
+            print("📭 Nessuna transazione trovata.")
             return
         
-        # 🔥 FORMATTA E STAMPA (usa parse_tx_date importato)
-        self._print_transactions(transactions, address)
+        print(f"\n📜 STORICO TRANSAZIONI ({crypto})")
+        print("=" * 150)
+        print(f"{'#':<4} {'Data/Ora':<20} {'Tipo':<12} {'Importo':<22} {'Fee':<12} {'Da/A':<70}")
+        print("-" * 150)
         
-        # Mostra explorer
-        network = result.get("network", "mainnet")
-        if network == "mainnet":
-            explorer = f"https://xrpscan.com/account/{address}"
-        elif network == "testnet":
-            explorer = f"https://testnet.xrpl.org/accounts/{address}"
+        if crypto == "XLM":
+            for idx, tx_data in enumerate(transactions, 1):
+                created_at = tx_data.get('created_at', '')
+                date_str = created_at.replace('T', ' ').replace('Z', '')[:19] if created_at else 'N/A'
+                
+                amount_str = ""
+                operations = tx_data.get('_embedded', {}).get('records', [])
+                if operations:
+                    op = operations[0]
+                    op_type = op.get('type', '')
+                    if op_type == 'payment':
+                        amount_raw = op.get('amount', 0)
+                        try:
+                            if amount_raw == '' or amount_raw is None:
+                                amount = 0.0
+                            else:
+                                amount = float(amount_raw)
+                        except (ValueError, TypeError):
+                            amount = 0.0
+                        asset = "XLM" if op.get('asset_type') == 'native' else op.get('asset_code', '?')
+                        amount_str = f"{amount:.7f} {asset}"
+                    elif op_type == 'create_account':
+                        amount_raw = op.get('starting_balance', 0)
+                        try:
+                            if amount_raw == '' or amount_raw is None:
+                                amount = 0.0
+                            else:
+                                amount = float(amount_raw)
+                        except (ValueError, TypeError):
+                            amount = 0.0
+                        amount_str = f"{amount:.7f} XLM"
+                    elif op_type in ['path_payment_strict_send', 'path_payment_strict_receive']:
+                        amount_raw = op.get('amount', 0)
+                        try:
+                            if amount_raw == '' or amount_raw is None:
+                                amount = 0.0
+                            else:
+                                amount = float(amount_raw)
+                        except (ValueError, TypeError):
+                            amount = 0.0
+                        amount_str = f"{amount:.7f} XLM"
+                    elif op_type == 'account_merge':
+                        amount_str = "MERGE"
+                
+                fee_stroops = tx_data.get('fee_charged', 0)
+                try:
+                    fee_xlm = int(fee_stroops) / 10_000_000
+                    fee_str = f"{fee_xlm:.8f}".rstrip('0').rstrip('.')
+                    if not fee_str or fee_str == '':
+                        fee_str = "0"
+                except:
+                    fee_str = str(fee_stroops)
+                
+                direction = "ALTRO"
+                da_a = ""
+                if operations:
+                    op = operations[0]
+                    op_type = op.get('type', '')
+                    if op_type == 'payment':
+                        from_acct = op.get('from', '')
+                        to_acct = op.get('to', '')
+                        if to_acct == address:
+                            direction = "RICEVUTO"
+                            da_a = f"Da: {from_acct}"
+                        elif from_acct == address:
+                            direction = "INVIATO"
+                            da_a = f"A: {to_acct}"
+                        else:
+                            direction = "ALTRO"
+                            da_a = f"{from_acct} → {to_acct}"
+                    elif op_type == 'create_account':
+                        to_acct = op.get('account', '')
+                        from_acct = op.get('funder', '')
+                        if to_acct == address:
+                            direction = "RICEVUTO"
+                            da_a = f"Da: {from_acct}"
+                        else:
+                            direction = "INVIATO"
+                            da_a = f"A: {to_acct}"
+                    elif op_type == 'account_merge':
+                        from_acct = op.get('account', '')
+                        to_acct = op.get('into', '')
+                        direction = "MERGE"
+                        da_a = f"{from_acct} → {to_acct}"
+                
+                memo_str = tx_data.get('memo', '')[:28]
+                print(f"{idx:<4} {date_str[:19]:<20} {direction:<12} {amount_str:<22} {fee_str:<12} {da_a:<70}")
+        
         else:
-            explorer = f"https://devnet.xrpl.org/accounts/{address}"
-        print(f"\n🔗 Visualizza tutto: {explorer}")
+            for idx, tx_data in enumerate(transactions, 1):
+                tx = tx_data.get("tx_json", {})
+                if not tx:
+                    continue
+                
+                date_str = "N/A"
+                if "date" in tx:
+                    try:
+                        ledger_time = tx.get("date", 0)
+                        if ledger_time:
+                            from datetime import datetime
+                            date_obj = datetime.fromtimestamp(ledger_time + 946684800)
+                            date_str = date_obj.strftime("%Y-%m-%d %H:%M:%S")
+                    except:
+                        pass
+                elif "close_time_iso" in tx_data:
+                    try:
+                        date_str = tx_data.get("close_time_iso", "").replace("T", " ").replace("Z", "")[:19]
+                    except:
+                        pass
+                
+                amount = tx.get("Amount", tx.get("DeliverMax", "0"))
+                if isinstance(amount, dict):
+                    token_value = amount.get('value', '0')
+                    token_currency = amount.get('currency', '???')
+                    try:
+                        amount_str = f"{float(token_value):.6f} {token_currency}"
+                    except:
+                        amount_str = f"{token_value[:8]} {token_currency}"
+                else:
+                    try:
+                        amount_xrp = int(amount) / 1_000_000
+                        amount_str = f"{amount_xrp:.6f} XRP"
+                    except:
+                        amount_str = f"{amount}"
+                
+                fee_drops = tx.get("Fee", "0")
+                try:
+                    fee_str = f"{int(fee_drops) / 1_000_000:.6f}"
+                except:
+                    fee_str = str(fee_drops)
+                
+                sender = tx.get("Account", "unknown")
+                destination = tx.get("Destination", "unknown")
+                if destination == address:
+                    direction = "RICEVUTO"
+                    da_a = f"Da: {sender}"
+                elif sender == address:
+                    direction = "INVIATO"
+                    da_a = f"A: {destination}"
+                else:
+                    direction = "ALTRO"
+                    da_a = f"{sender} → {destination}"
+                
+                memo_str = ""
+                memos = tx.get("Memos", [])
+                if memos:
+                    try:
+                        memo_data = memos[0].get("Memo", {}).get("MemoData", "")
+                        if memo_data:
+                            try:
+                                memo_bytes = bytes.fromhex(memo_data)
+                                memo_str = memo_bytes.decode('utf-8', errors='ignore')[:28]
+                            except:
+                                try:
+                                    import base64
+                                    while len(memo_data) % 4 != 0:
+                                        memo_data += '='
+                                    memo_bytes = base64.b64decode(memo_data)
+                                    memo_str = memo_bytes.decode('utf-8', errors='ignore')[:28]
+                                except:
+                                    memo_str = memo_data[:28]
+                            memo_str = ''.join(c for c in memo_str if c.isprintable() or c == ' ')
+                    except:
+                        pass
+                
+                print(f"{idx:<4} {date_str[:19]:<20} {direction:<12} {amount_str:<22} {fee_str:<12} {da_a:<70}")
+        
+        print("=" * 150)
+        print(f"📊 Totale: {len(transactions)} transazioni mostrate")
+        
+        if crypto == "XLM":
+            if result.get("network") == "mainnet":
+                print(f"🔗 https://stellar.expert/explorer/public/account/{address}")
+            else:
+                print(f"🔗 https://stellar.expert/explorer/testnet/account/{address}")
+        else:
+            if result.get("network") == "mainnet":
+                print(f"🔗 https://xrpscan.com/account/{address}")
+            else:
+                print(f"🔗 https://testnet.xrpl.org/accounts/{address}")
     
     def _print_transactions(self, transactions: List, address: str) -> None:
         """Stampa transazioni in formato tabella - UI SOLO"""
@@ -583,7 +779,7 @@ class PaxWalletCLI:
                 continue
             
             tx_type = tx.get("TransactionType", "Unknown")
-            date_str = parse_tx_date(tx, tx_data)  # <-- USA FUNZIONE GLOBALE
+            date_str = parse_tx_date(tx, tx_data)
             
             fee_drops = tx.get("Fee", "0")
             try:
@@ -603,7 +799,6 @@ class PaxWalletCLI:
                     token_value = amount.get('value', '0')
                     token_currency = amount.get('currency', '???')
                     
-                    # Decodifica currency se necessario
                     if len(token_currency) > 3:
                         try:
                             bytes_data = bytes.fromhex(token_currency)
@@ -761,7 +956,6 @@ class PaxWalletCLI:
                 print_yellow("❌ Nessuna trustline trovata")
                 return
             
-            # 🔥 DETERMINA IL NETWORK
             network = "MAINNET" if self.backend.wallet._xrp_manager.network == "mainnet" else "TESTNET"
             crypto = self.backend.wallet._xrp_manager.crypto_type
             
@@ -777,7 +971,6 @@ class PaxWalletCLI:
                 limit = tl.get('limit', 0)
                 is_active = tl.get('is_active', False)
                 
-                # 🔥 FORMATTA NUMERI
                 try:
                     bal_str = f"{float(balance):.6f}".rstrip('0').rstrip('.')
                     if not bal_str:
@@ -792,7 +985,6 @@ class PaxWalletCLI:
                 except:
                     lim_str = str(limit)
                 
-                # 🔥 STATUS
                 if is_active:
                     status = "✅ Active"
                 elif balance > 0:
@@ -800,7 +992,6 @@ class PaxWalletCLI:
                 else:
                     status = "⏳ Pending"
                 
-                # 🔥 TRONCA ISSUER SE TROPPO LUNGO
                 issuer_display = issuer if len(issuer) <= 34 else issuer[:32] + "..."
                 
                 print(f"{i:<4} {asset:<12} {issuer_display:<36} {bal_str:<16} {lim_str:<14} {status}")
@@ -871,7 +1062,6 @@ class PaxWalletCLI:
             return
         issuer = input("Issuer (opzionale): ").strip() or None
         
-        # 🔥 CHIEDI DESTINATION TAG
         dest_tag_input = input("Destination Tag (opzionale, numero): ").strip()
         dest_tag = int(dest_tag_input) if dest_tag_input else None
         
@@ -888,18 +1078,15 @@ class PaxWalletCLI:
     
     def _menu_reticulum(self):
         while True:
-            # 🔥 OTTIENI TUTTO DAL BACKEND
             gateway_result = self.backend.get_gateway_status()
             gateway_status = gateway_result.get("status", {}) if gateway_result.get("success") else {}
             
             status = self.backend.get_status()
             internet_status = "🌐 ON" if self.backend.use_internet else "📡 OFF (Reticulum)"
             
-            # 🔥 TOR STATUS
             tor_status = "🧅 ON" if self.backend.use_tor else "🧅 OFF"
             tor_reachable = "✅" if self.backend._test_tor() else "❌"
             
-            # IP
             if self.backend.use_internet:
                 ip_info = self.backend.get_ip_status()
                 ip = ip_info.get("ip", "N/A")
@@ -970,7 +1157,6 @@ class PaxWalletCLI:
         if result.get("success"):
             status = result.get("status", {})
             
-            # 🔥 REAL-TIME TOR TEST
             tor_reachable = "✅" if self.backend._test_tor() else "❌"
             
             print_bold("\n📊 GATEWAY STATUS")
@@ -1079,53 +1265,53 @@ class PaxWalletCLI:
         print("=" * 100)
     
     def _cmd_peer_metrics(self):
-        """Peer metriche"""
+        """Mostra metriche peer - VERSIONE CLI"""
         result = self.backend.get_peer_metrics()
         
         if not result.get("success"):
-            print_red(f"❌ {result.get('message', 'Error')}")
+            print_red(f"❌ {result.get('message', 'Errore')}")
             return
         
         peers = result.get("peers", [])
+        stats = result.get("stats", {})
+        
         if not peers:
-            print_yellow(f"⚠️ {result.get('message', 'Nessun peer disponibile')}")
+            print_yellow("❌ Nessun peer trovato")
             return
         
-        # 🔥 MOSTRA FILTRO APPLICATO
         if self.backend.use_tor:
             print_blue("🧅 TOR ON: gateway filtrati per TOR + Internet")
         else:
             print_green("🌐 TOR OFF: gateway filtrati per Internet")
         
-        print_bold(f"\n🔍 PEER ORDINATI PER PERFORMANCE ({len(peers)})")
+        print_bold(f"\n📊 PEER METRICHE ({len(peers)} peer)")
         print("=" * 280)
         print(f"{'#':<3} {'Nome':<22} {'Score':<6} {'Rel':<6} {'Rep':<4} {'Hops':<5} {'RTT':<8} {'XRP':<14} {'Stellar':<14} {'Internet':<9} {'TOR':<6} {'Ultimo visto':<15} {'ID':<36} {'Assets'}")
         print("-" * 280)
         
         for idx, p in enumerate(peers, 1):
-            name = str(p.get('name', 'UNKNOWN'))[:16]
+            name = str(p.get('name', 'UNKNOWN'))[:18]
+            sc = round(p.get('_score', 0))
+            rel = round(p.get('reliability', 0), 2)
+            rep = p.get('reputation', 50)
             hops = str(p.get('hops', '?'))
-            rtt = f"{p.get('latency_ms', '?')}ms"
+            rtt = p.get('latency_ms')
+            rtt_str = f"{rtt:.0f}ms" if rtt is not None else "?ms"
             
-            # XRP
             if p.get('xrp_reachable'):
                 xrp_lat = p.get('xrp_latency_ms')
-                xrp_str = f"✅{xrp_lat}ms" if xrp_lat else "✅ OK"
+                xrp_str = f"✅{xrp_lat:.0f}ms" if xrp_lat is not None else "✅ OK"
             else:
                 xrp_str = "❌"
             
-            # Stellar
             if p.get('stellar_reachable'):
                 stellar_lat = p.get('stellar_latency_ms')
-                stellar_str = f"✅{stellar_lat}ms" if stellar_lat else "✅ OK"
+                stellar_str = f"✅{stellar_lat:.0f}ms" if stellar_lat is not None else "✅ OK"
             else:
                 stellar_str = "❌"
             
             internet = "🌐" if p.get('has_internet') else "📡"
-            last_seen = format_time_ago(p.get('last_seen'))
-            gw_id = p.get('gateway_id', 'N/A')[:36]
             
-            # TOR
             tor_enabled = p.get('tor_enabled', False)
             tor_reachable = p.get('tor_reachable', False)
             if tor_enabled and tor_reachable:
@@ -1135,6 +1321,9 @@ class PaxWalletCLI:
             else:
                 tor_str = "—"
             
+            last_seen = format_time_ago(p.get('last_seen'))
+            gw_id = p.get('gateway_id', 'N/A')[:36]
+            
             assets = p.get('assets', [])
             if isinstance(assets, list):
                 assets_str = ', '.join(assets[:3])
@@ -1143,26 +1332,27 @@ class PaxWalletCLI:
             else:
                 assets_str = str(assets)[:20]
             
-            print(f"{idx:<3} {name:<20} {hops:<5} {rtt:<8} {xrp_str:<14} {stellar_str:<14} {internet:<9} {tor_str:<6} {last_seen:<15} {gw_id:<36} {assets_str}")
+            print(f"{idx:<3} {name:<20} {sc:<6} {rel:<6} {rep:<4} {hops:<5} {rtt_str:<8} {xrp_str:<14} {stellar_str:<14} {internet:<9} {tor_str:<6} {last_seen:<15} {gw_id:<36} {assets_str}")
         
         print("=" * 280)
         
-        stats = result.get("stats", {})
         if stats:
             print(f"\n📊 Statistiche:")
             print(f"   Totale peer: {stats.get('total_peers', 0)}")
+            if stats.get('online_peers', 0) > 0:
+                print(f"   Online: {stats.get('online_peers', 0)}")
             if stats.get('tor_peers', 0) > 0:
                 print(f"   Gateway con TOR: {stats.get('tor_peers')}")
             if stats.get('xrp_peers', 0) > 0:
                 print(f"   Gateway con XRP: {stats.get('xrp_peers')}")
             if stats.get('stellar_peers', 0) > 0:
                 print(f"   Gateway con Stellar: {stats.get('stellar_peers')}")
-            if stats.get('avg_latency_ms'):
+            if stats.get('avg_latency_ms', 0) > 0:
                 print(f"   Latenza media: {round(stats.get('avg_latency_ms'), 0)}ms")
         
         if peers:
             b = peers[0]
-            print(f"\n🏆 MIGLIOR PEER: {b.get('name', 'UNKNOWN')}")
+            print_bold(f"\n🏆 MIGLIOR PEER: {b.get('name', 'UNKNOWN')}")
             print(f"   Hops: {b.get('hops', '?')} | RTT: {b.get('latency_ms', '?')}ms")
             print(f"   XRP: {'✅' if b.get('xrp_reachable') else '❌'} ({b.get('xrp_latency_ms', '?')}ms)")
             print(f"   Stellar: {'✅' if b.get('stellar_reachable') else '❌'} ({b.get('stellar_latency_ms', '?')}ms)")
@@ -1203,35 +1393,29 @@ class PaxWalletCLI:
             print(f"   Status:         {'✅ ONLINE' if gw.get('is_online') else '❌ OFFLINE'}")
             print("-" * 70)
             
-            # XRP
             if gw.get('xrp_reachable'):
                 print(f"   XRP:            ✅ Raggiungibile ({gw.get('xrp_latency_ms', '?')}ms)")
             else:
                 print(f"   XRP:            ❌ Non raggiungibile")
             
-            # Stellar
             if gw.get('stellar_reachable'):
                 print(f"   Stellar:        ✅ Raggiungibile ({gw.get('stellar_latency_ms', '?')}ms)")
             else:
                 print(f"   Stellar:        ❌ Non raggiungibile")
             
-            # Assets
             assets = gw.get('assets', [])
             if isinstance(assets, list) and assets:
                 print(f"   Assets:         {', '.join(assets)}")
             
-            # Networks
             networks = gw.get('networks', [])
             if isinstance(networks, list) and networks:
                 print(f"   Networks:       {', '.join(networks)}")
             
-            # Fee
             fee = gw.get('fee', 'N/A')
             fee_asset = gw.get('fee_asset', '')
             if fee != 'N/A':
                 print(f"   Fee:            {fee} {fee_asset}")
             
-            # RSSI/SNR (se disponibili)
             if gw.get('rssi') is not None:
                 print(f"   RSSI:           {gw.get('rssi')}dBm")
             if gw.get('snr') is not None:
@@ -1247,7 +1431,6 @@ class PaxWalletCLI:
             print_red("❌ Metriche non disponibili")
             return
         
-        # 🔥 USA discover_gateways() DEL BACKEND
         result = self.backend.discover_gateways(active_only=False)
         
         if not result.get("success"):
@@ -1256,7 +1439,6 @@ class PaxWalletCLI:
         
         gateways = result.get("gateways", [])
         
-        # 🔥 FILTRA IL PROPRIO GATEWAY
         my_id = self.backend.reticulum.gateway_address if hasattr(self.backend.reticulum, 'gateway_address') else None
         if my_id:
             gateways = [g for g in gateways if g.get('gateway_id') != my_id]
@@ -1265,7 +1447,6 @@ class PaxWalletCLI:
             print_yellow("⚠️ Solo il proprio gateway trovato, nessun peer disponibile")
             return
         
-        # 🔥 MOSTRA LISTA CON INDIRIZZO COMPLETO
         print_blue("🔍 Gateway disponibili:")
         print(f"   Trovati {len(gateways)} gateway (escluso se stesso)")
         for i, gw in enumerate(gateways, 1):
@@ -1327,7 +1508,6 @@ class PaxWalletCLI:
         print(f"   Risposte ricevute: {result.get('successful', 0)}")
         print("=" * 80)
         
-        # 🔥 TABELLA CON STATO RETICULUM, INTERNET E TOR
         print("\n📋 RISULTATI:")
         print("-" * 100)
         print(f"{'#':<3} {'Nome':<20} {'Reticulum':<12} {'Internet':<10} {'TOR':<8} {'Hops':<6}")
@@ -1361,7 +1541,6 @@ class PaxWalletCLI:
         print("   - gateway_peers.db (metriche)")
         print("")
         
-        # Prima mostra la lista dei gateway disponibili
         result = self.backend.discover_gateways(active_only=False)
         if not result.get("success"):
             print_red(f"❌ {result.get('message', 'Errore')}")
@@ -1405,14 +1584,12 @@ class PaxWalletCLI:
             gw_id = gw.get('gateway_id')
             name = gw.get('name', 'UNKNOWN')
             
-            # Chiedi conferma
             print(f"\n⚠️ Stai per rimuovere: {name} ({gw_id[:16]}...)")
             confirm = input("   Confermi? (s/N): ").strip().lower()
             if confirm != 's':
                 print_yellow("❌ Operazione annullata")
                 return
             
-            # Esegui la rimozione
             result = self.backend.remove_gateway(gw_id)
             if result.get("success"):
                 print_green(f"✅ {result.get('message', 'Rimosso con successo')}")
@@ -1441,7 +1618,6 @@ class PaxWalletCLI:
         """Toggle TOR (rete anonima)"""
         current = self.backend.use_tor
         
-        # Se stai attivando TOR, verifica che sia raggiungibile
         if not current:
             print_blue("🧅 Verifica connessione TOR...")
             if not self.backend._test_tor():
@@ -1453,7 +1629,6 @@ class PaxWalletCLI:
                     print_yellow("❌ TOR non attivato")
                     return
         
-        # Cambia stato
         self.backend.set_use_tor(not current)
         
         if current:
@@ -1462,11 +1637,340 @@ class PaxWalletCLI:
         else:
             print_green("🧅 TOR attivato")
             print_yellow("   Le connessioni al ledger useranno rete TOR (più lento)")
-            # Verifica finale
             if self.backend._test_tor():
                 print_green("✅ TOR raggiungibile e funzionante")
             else:
                 print_yellow("⚠️ TOR non risponde. Controlla il demone.")
+
+    # ============================================================
+    # RUBRICA
+    # ============================================================
+    
+    def _menu_address_book(self):
+        """Sottomenu rubrica"""
+        while True:
+            # Mostra statistiche
+            stats_result = self.backend.get_contact_stats()
+            stats = stats_result.get("stats", {}) if stats_result.get("success") else {}
+            
+            print("\n" + "=" * 50)
+            print("  📇 RUBRICA INDIRIZZI")
+            print("=" * 50)
+            print(f"  Totale contatti: {stats.get('total', 0)}")
+            print(f"  Manuali: {stats.get('manual', 0)} | Automatici: {stats.get('auto', 0)}")
+            print(f"  Preferiti: {stats.get('favorites', 0)}")
+            print(f"  XRP: {stats.get('xrp', 0)} | XLM: {stats.get('xlm', 0)}")
+            print("")
+            
+            print("  1) Lista contatti")
+            print("  2) Cerca contatto")
+            print("  3) Aggiungi contatto")
+            print("  4) Modifica contatto")
+            print("  5) Elimina contatto")
+            print("  6) Toggle preferito")
+            print("  0) Torna al menu principale")
+            print("-" * 50)
+            
+            sub = input("\nScelta: ").strip()
+            
+            if sub == '0':
+                break
+            elif sub == '1':
+                self._cmd_list_contacts()
+            elif sub == '2':
+                self._cmd_search_contacts()
+            elif sub == '3':
+                self._cmd_add_contact()
+            elif sub == '4':
+                self._cmd_edit_contact()
+            elif sub == '5':
+                self._cmd_delete_contact()
+            elif sub == '6':
+                self._cmd_toggle_favorite()
+            else:
+                print_red("❌ Scelta non valida")
+    
+    def _cmd_list_contacts(self):
+        """Lista tutti i contatti"""
+        sort_by = input("Ordina per (name/last_used/tx_count) [name]: ").strip() or "name"
+        
+        result = self.backend.get_contacts(sort_by=sort_by)
+        
+        if not result.get("success"):
+            print_red(f"❌ {result.get('message', 'Errore')}")
+            return
+        
+        contacts = result.get("contacts", [])
+        
+        if not contacts:
+            print_yellow("📭 Nessun contatto in rubrica")
+            return
+        
+        print_bold(f"\n📇 RUBRICA ({len(contacts)} contatti)")
+        print("=" * 140)
+        print(f"{'#':<4} {'⭐':<3} {'Nome':<22} {'Indirizzo':<40} {'Crypto':<6} {'Tipo':<8} {'TX':<6} {'Ultimo uso'}")
+        print("-" * 140)
+        
+        for i, c in enumerate(contacts, 1):
+            star = "⭐" if c.get("is_favorite") else " "
+            name = c.get("name", "N/A")[:20]
+            address = c.get("address", "N/A")[:38]
+            crypto = c.get("crypto", "XRP")
+            source = c.get("source", "auto")[:6]
+            tx_count = c.get("tx_count", 0)
+            last_used = c.get("last_used", 0)
+            last_str = format_time_ago(last_used) if last_used else "Mai"
+            
+            print(f"{i:<4} {star:<3} {name:<22} {address:<40} {crypto:<6} {source:<8} {tx_count:<6} {last_str}")
+        
+        print("=" * 140)
+        print(f"Totale: {len(contacts)} contatti")
+    
+    def _cmd_search_contacts(self):
+        """Cerca contatti"""
+        query = input("Cerca (nome o indirizzo): ").strip()
+        if not query:
+            print_yellow("❌ Inserisci un termine di ricerca")
+            return
+        
+        result = self.backend.get_contacts(search=query)
+        
+        if not result.get("success"):
+            print_red(f"❌ {result.get('message', 'Errore')}")
+            return
+        
+        contacts = result.get("contacts", [])
+        
+        if not contacts:
+            print_yellow(f"📭 Nessun contatto trovato per '{query}'")
+            return
+        
+        print_bold(f"\n🔍 RISULTATI PER '{query}' ({len(contacts)} contatti)")
+        print("=" * 140)
+        print(f"{'#':<4} {'⭐':<3} {'Nome':<22} {'Indirizzo':<40} {'Crypto':<6} {'Tipo':<8} {'TX':<6} {'Ultimo uso'}")
+        print("-" * 140)
+        
+        for i, c in enumerate(contacts, 1):
+            star = "⭐" if c.get("is_favorite") else " "
+            name = c.get("name", "N/A")[:20]
+            address = c.get("address", "N/A")[:38]
+            crypto = c.get("crypto", "XRP")
+            source = c.get("source", "auto")[:6]
+            tx_count = c.get("tx_count", 0)
+            last_used = c.get("last_used", 0)
+            last_str = format_time_ago(last_used) if last_used else "Mai"
+            
+            print(f"{i:<4} {star:<3} {name:<22} {address:<40} {crypto:<6} {source:<8} {tx_count:<6} {last_str}")
+        
+        print("=" * 140)
+    
+    def _cmd_add_contact(self):
+        """Aggiungi contatto manuale"""
+        address = input("Indirizzo: ").strip()
+        if not address:
+            print_red("❌ Indirizzo obbligatorio")
+            return
+        
+        # Verifica se esiste già
+        existing = self.backend.get_contact(address)
+        if existing.get("success") and existing.get("contact"):
+            print_yellow(f"⚠️ Contatto già esistente: {existing['contact'].get('name')}")
+            overwrite = input("   Sovrascrivere? (s/N): ").strip().lower()
+            if overwrite != 's':
+                return
+        
+        name = input("Nome: ").strip()
+        if not name:
+            name = address[:12]
+        
+        crypto = input("Crypto (XRP/XLM) [XRP]: ").strip().upper() or "XRP"
+        network = input("Network (mainnet/testnet) [mainnet]: ").strip().lower() or "mainnet"
+        tags = input("Tags (separati da virgola): ").strip()
+        tags_list = [t.strip() for t in tags.split(",")] if tags else []
+        notes = input("Note: ").strip()
+        is_favorite = input("Preferito? (s/N): ").strip().lower() == 's'
+        
+        result = self.backend.add_contact(address, name, crypto, network, tags_list, notes, is_favorite)
+        
+        if result.get("success"):
+            print_green(f"✅ Contatto '{name}' aggiunto!")
+        else:
+            print_red(f"❌ {result.get('message', 'Errore')}")
+    
+    def _cmd_edit_contact(self):
+        """Modifica contatto"""
+        # Prima lista contatti
+        result = self.backend.get_contacts()
+        if not result.get("success"):
+            print_red(f"❌ {result.get('message', 'Errore')}")
+            return
+        
+        contacts = result.get("contacts", [])
+        if not contacts:
+            print_yellow("📭 Nessun contatto in rubrica")
+            return
+        
+        print_bold("\n📇 SELEZIONA CONTATTO DA MODIFICARE")
+        print("=" * 120)
+        print(f"{'#':<4} {'Nome':<22} {'Indirizzo':<40} {'Crypto':<6} {'Tipo':<8}")
+        print("-" * 120)
+        
+        for i, c in enumerate(contacts, 1):
+            name = c.get("name", "N/A")[:20]
+            address = c.get("address", "N/A")[:38]
+            crypto = c.get("crypto", "XRP")
+            source = c.get("source", "auto")[:6]
+            print(f"{i:<4} {name:<22} {address:<40} {crypto:<6} {source:<8}")
+        
+        print("=" * 120)
+        
+        choice = input("\nNumero contatto (o Invio): ").strip()
+        if not choice or not choice.isdigit():
+            return
+        
+        idx = int(choice) - 1
+        if idx < 0 or idx >= len(contacts):
+            print_red("❌ Numero non valido")
+            return
+        
+        contact = contacts[idx]
+        address = contact.get("address")
+        
+        print(f"\n📝 MODIFICA CONTATTO: {contact.get('name')}")
+        print("-" * 40)
+        
+        name = input(f"Nome [{contact.get('name')}]: ").strip()
+        if not name:
+            name = contact.get('name')
+        
+        crypto = input(f"Crypto (XRP/XLM) [{contact.get('crypto')}]: ").strip().upper()
+        if not crypto:
+            crypto = contact.get('crypto')
+        
+        tags_input = input(f"Tags [{', '.join(contact.get('tags', []))}]: ").strip()
+        tags_list = [t.strip() for t in tags_input.split(",")] if tags_input else contact.get('tags', [])
+        
+        notes = input(f"Note [{contact.get('notes', '')}]: ").strip()
+        if not notes:
+            notes = contact.get('notes', '')
+        
+        is_favorite = contact.get('is_favorite', False)
+        fav_input = input(f"Preferito? (s/N) [{ 'S' if is_favorite else 'N'}]: ").strip().lower()
+        if fav_input == 's':
+            is_favorite = True
+        elif fav_input == 'n':
+            is_favorite = False
+        
+        result = self.backend.add_contact(address, name, crypto, None, tags_list, notes, is_favorite)
+        
+        if result.get("success"):
+            print_green(f"✅ Contatto '{name}' aggiornato!")
+        else:
+            print_red(f"❌ {result.get('message', 'Errore')}")
+    
+    def _cmd_delete_contact(self):
+        """Elimina contatto"""
+        # Prima lista contatti
+        result = self.backend.get_contacts()
+        if not result.get("success"):
+            print_red(f"❌ {result.get('message', 'Errore')}")
+            return
+        
+        contacts = result.get("contacts", [])
+        if not contacts:
+            print_yellow("📭 Nessun contatto in rubrica")
+            return
+        
+        print_bold("\n🗑️ SELEZIONA CONTATTO DA ELIMINARE")
+        print("=" * 120)
+        print(f"{'#':<4} {'Nome':<22} {'Indirizzo':<40} {'Crypto':<6} {'Tipo':<8}")
+        print("-" * 120)
+        
+        for i, c in enumerate(contacts, 1):
+            name = c.get("name", "N/A")[:20]
+            address = c.get("address", "N/A")[:38]
+            crypto = c.get("crypto", "XRP")
+            source = c.get("source", "auto")[:6]
+            print(f"{i:<4} {name:<22} {address:<40} {crypto:<6} {source:<8}")
+        
+        print("=" * 120)
+        
+        choice = input("\nNumero contatto da eliminare (o Invio): ").strip()
+        if not choice or not choice.isdigit():
+            return
+        
+        idx = int(choice) - 1
+        if idx < 0 or idx >= len(contacts):
+            print_red("❌ Numero non valido")
+            return
+        
+        contact = contacts[idx]
+        address = contact.get("address")
+        name = contact.get("name")
+        
+        print(f"\n⚠️ Stai per eliminare: {name} ({address[:16]}...)")
+        confirm = input("   Confermi? (s/N): ").strip().lower()
+        if confirm != 's':
+            print_yellow("❌ Operazione annullata")
+            return
+        
+        result = self.backend.delete_contact(address)
+        
+        if result.get("success"):
+            print_green(f"✅ Contatto '{name}' eliminato!")
+        else:
+            print_red(f"❌ {result.get('message', 'Errore')}")
+    
+    def _cmd_toggle_favorite(self):
+        """Toggle preferito per un contatto"""
+        # Prima lista contatti
+        result = self.backend.get_contacts()
+        if not result.get("success"):
+            print_red(f"❌ {result.get('message', 'Errore')}")
+            return
+        
+        contacts = result.get("contacts", [])
+        if not contacts:
+            print_yellow("📭 Nessun contatto in rubrica")
+            return
+        
+        print_bold("\n⭐ TOGGLE PREFERITO")
+        print("=" * 120)
+        print(f"{'#':<4} {'⭐':<3} {'Nome':<22} {'Indirizzo':<40} {'Crypto':<6}")
+        print("-" * 120)
+        
+        for i, c in enumerate(contacts, 1):
+            star = "⭐" if c.get("is_favorite") else " "
+            name = c.get("name", "N/A")[:20]
+            address = c.get("address", "N/A")[:38]
+            crypto = c.get("crypto", "XRP")
+            print(f"{i:<4} {star:<3} {name:<22} {address:<40} {crypto:<6}")
+        
+        print("=" * 120)
+        
+        choice = input("\nNumero contatto (o Invio): ").strip()
+        if not choice or not choice.isdigit():
+            return
+        
+        idx = int(choice) - 1
+        if idx < 0 or idx >= len(contacts):
+            print_red("❌ Numero non valido")
+            return
+        
+        contact = contacts[idx]
+        address = contact.get("address")
+        name = contact.get("name")
+        
+        result = self.backend.toggle_favorite(address)
+        
+        if result.get("success"):
+            new_status = not contact.get("is_favorite", False)
+            if new_status:
+                print_green(f"⭐ '{name}' aggiunto ai preferiti!")
+            else:
+                print_yellow(f"⭐ '{name}' rimosso dai preferiti")
+        else:
+            print_red(f"❌ {result.get('message', 'Errore')}")
 
 # ============================================================
 # MAIN

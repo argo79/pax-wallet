@@ -48,7 +48,7 @@ class ListViewWithDetail(QWidget):
         self.detail_text.setObjectName("detail_text")
         self.detail_text.setFont(QFont("Courier New", 10))
         self.detail_text.setMinimumHeight(100)
-        self.detail_text.setMaximumHeight(180)
+        self.detail_text.setMaximumHeight(450)
         self.detail_layout.addWidget(self.detail_text)
 
         top_layout.addWidget(self.controls_widget, 2)
