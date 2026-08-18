@@ -1,0 +1,2 @@
+[console_scripts]
+lxmd = LXMF.Utilities.lxmd:main

@@ -1,0 +1,2 @@
+[console_scripts]
+nomadnet = nomadnet.nomadnet:main
