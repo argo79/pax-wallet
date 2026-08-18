@@ -23,7 +23,7 @@ from wallet_backend import WalletBackend, create_backend, Colors, format_time_ag
 # ============================================================
 # VERSIONE
 # ============================================================
-VERSION = "0.10.3"
+VERSION = "0.11.0"
 __version__ = VERSION
 
 
