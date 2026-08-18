@@ -1,0 +1,27 @@
+{
+    "gateway": {
+        "name": "gateway-TEST",
+        "announce_interval": 120,
+        "internet": "on",
+        "use_tor": "on",
+        "tor_socks_port": 9050,
+        "tor_timeout_seconds": 30,
+        "ledger_check_interval": 1800,
+        "ledger_timeout_seconds": 4,
+        "query_interval": 3600,
+        "max_peers_to_query": 10,
+        "max_hops_for_query": 7,
+        "query_timeout_seconds": 15,
+        "discover_since_seconds": 86400
+    },
+    "wallet": {
+        "name": "wallet",
+        "announce_interval": 1800,
+        "discover_since_seconds": 86400
+    },
+    "sync": {
+        "peers_per_cycle": 2,
+        "timeout_seconds": 5
+    },
+    "background": false
+}
