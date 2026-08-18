@@ -1,0 +1,29 @@
+# Core dependencies
+bip32>=3.0.0
+mnemonic>=0.20
+xrpl-py>=4.0.0
+stellar-sdk>=10.0.0
+cryptography>=41.0.0
+ecdsa>=0.18.0
+base58>=2.1.0
+json5>=0.15.0
+coincurve==19.0.0
+PySide6>=6.6.0
+
+# Supporto SOCKS per TOR
+PySocks>=1.7.1
+requests[socks]>=2.31.0
+
+# Reticulum
+RNS>=0.5.0
+
+# CLI e UI
+colorama>=0.4.6
+
+# Build tools
+pyinstaller>=6.0.0
+
+# Utility
+requests>=2.31.0
+httpx[socks]>=0.24.0
+socksio>=1.0.0

@@ -1,0 +1,531 @@
+/* ============================================================
+   PAX WALLET - CYBERPUNK STYLE
+   Colori: Nero (#0a0a0a), Verde (#00ff41), Verde scuro (#003b00)
+   ============================================================ */
+
+/* ============================================================
+   GENERALE
+   ============================================================ */
+
+QWidget {
+    background-color: #0a0a0a;
+    color: #00ff41;
+    font-family: "Courier New", "Consolas", "Monaco", monospace;
+}
+
+/* ============================================================
+   SIDEBAR
+   ============================================================ */
+
+#sidebar {
+    background-color: #0d0d0d;
+    border-right: 1px solid #00ff41;
+}
+
+#logo {
+    color: #00ff41;
+    font-size: 18px;
+    font-weight: bold;
+    padding: 10px 0;
+}
+
+#wallet_info {
+    background-color: #0d0d0d;
+    border: 1px solid #003b00;
+    border-radius: 10px;
+    padding: 10px;
+}
+
+#wallet_name {
+    color: #00ff41;
+    font-size: 12px;
+}
+
+#balance {
+    color: #00ff41;
+    font-size: 16px;
+    font-weight: bold;
+}
+
+#nav_button {
+    background-color: transparent;
+    color: #00ff41;
+    border: 1px solid transparent;
+    padding: 10px 15px;
+    text-align: left;
+    font-size: 13px;
+    border-radius: 8px;
+    font-family: "Courier New", monospace;
+}
+
+#nav_button:hover {
+    background-color: #003b00;
+    border-color: #00ff41;
+    color: #00ff41;
+}
+
+#nav_button:checked {
+    background-color: #00ff41;
+    color: #0a0a0a;
+    font-weight: bold;
+    border-color: #00ff41;
+}
+
+#version {
+    color: #003b00;
+    font-size: 10px;
+}
+
+/* ============================================================
+   CONTENUTO PRINCIPALE
+   ============================================================ */
+
+#content_stack {
+    background-color: #0a0a0a;
+}
+
+.view_title {
+    color: #00ff41;
+    font-size: 22px;
+    font-weight: bold;
+}
+
+#welcome_label {
+    color: #8892b0;
+    font-size: 13px;
+    padding: 8px 0;
+    border-bottom: 1px solid #003b00;
+    margin-bottom: 10px;
+}
+
+/* ============================================================
+   UNLOCK WINDOW
+   ============================================================ */
+
+#unlock_logo {
+    color: #00ff41;
+    font-size: 36px;
+    font-weight: bold;
+}
+
+#unlock_desc {
+    color: #00ff41;
+    font-size: 14px;
+}
+
+#error {
+    color: #ff0040;
+    font-size: 13px;
+}
+
+/* ============================================================
+   BALANCE CARD
+   ============================================================ */
+
+#balance_card {
+    background-color: #0d0d0d;
+    border: 1px solid #00ff41;
+    border-radius: 15px;
+    padding: 30px;
+}
+
+#big_balance {
+    color: #00ff41;
+    font-size: 32px;
+    font-weight: bold;
+}
+
+#usd_balance {
+    color: #003b00;
+    font-size: 16px;
+}
+
+/* ============================================================
+   LISTA TRANSAZIONI - FONT MONOSPACE PER ALLINEAMENTO
+   ============================================================ */
+
+#tx_list {
+    background-color: #0d0d0d;
+    border: 1px solid #003b00;
+    border-radius: 10px;
+    color: #00ff41;
+    padding: 5px;
+    font-family: "Courier New", "Monaco", "Consolas", monospace;
+    font-size: 11px;
+}
+
+#tx_list::item {
+    padding: 3px 8px;
+    border-radius: 4px;
+}
+
+#tx_list::item:hover {
+    background-color: #003b00;
+}
+
+#tx_list::item:selected {
+    background-color: #00ff41;
+    color: #0a0a0a;
+}
+
+/* ============================================================
+   BOTTONI
+   ============================================================ */
+
+#exit_btn {
+    background-color: #1a0a0a;
+    color: #ff6b6b;
+    border: 1px solid #ff6b6b;
+    border-radius: 8px;
+    padding: 8px 15px;
+    font-family: "Courier New", monospace;
+    font-size: 13px;
+}
+
+#exit_btn:hover {
+    background-color: #ff6b6b;
+    color: #0a0a0a;
+}
+
+#exit_btn:pressed {
+    background-color: #cc0000;
+    border-color: #cc0000;
+}
+
+QPushButton {
+    background-color: #0d0d0d;
+    color: #00ff41;
+    border: 1px solid #00ff41;
+    border-radius: 8px;
+    padding: 10px 20px;
+    font-family: "Courier New", monospace;
+    font-size: 13px;
+}
+
+QPushButton:hover {
+    background-color: #003b00;
+    border-color: #00ff41;
+}
+
+QPushButton:pressed {
+    background-color: #00ff41;
+    color: #0a0a0a;
+}
+
+QPushButton:disabled {
+    background-color: #0d0d0d;
+    color: #003b00;
+    border-color: #003b00;
+}
+
+#quick_action {
+    background-color: #0d0d0d;
+    color: #00ff41;
+    border: 1px solid #00ff41;
+    border-radius: 10px;
+    padding: 15px;
+    font-size: 14px;
+    font-family: "Courier New", monospace;
+}
+
+#quick_action:hover {
+    background-color: #003b00;
+    border-color: #00ff41;
+}
+
+#send_btn {
+    background-color: #00ff41;
+    color: #0a0a0a;
+    font-weight: bold;
+    padding: 12px;
+    border: 1px solid #00ff41;
+    border-radius: 10px;
+    font-size: 16px;
+    font-family: "Courier New", monospace;
+}
+
+#send_btn:hover {
+    background-color: #00cc33;
+    border-color: #00cc33;
+}
+
+#send_btn:disabled {
+    background-color: #003b00;
+    color: #0a0a0a;
+    border-color: #003b00;
+}
+
+/* ============================================================
+   INPUT
+   ============================================================ */
+
+QLineEdit {
+    background-color: #0d0d0d;
+    color: #00ff41;
+    border: 1px solid #003b00;
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-size: 13px;
+    font-family: "Courier New", monospace;
+}
+
+QLineEdit:focus {
+    border-color: #00ff41;
+    background-color: #0a0a0a;
+}
+
+QLineEdit::placeholder {
+    color: #003b00;
+}
+
+/* ============================================================
+   LISTE
+   ============================================================ */
+
+QListWidget {
+    background-color: #0d0d0d;
+    border: 1px solid #003b00;
+    border-radius: 10px;
+    color: #00ff41;
+    padding: 5px;
+    font-family: "Courier New", monospace;
+}
+
+QListWidget::item {
+    padding: 8px 12px;
+    border-radius: 6px;
+}
+
+QListWidget::item:hover {
+    background-color: #003b00;
+}
+
+QListWidget::item:selected {
+    background-color: #00ff41;
+    color: #0a0a0a;
+}
+
+/* ============================================================
+   GROUP BOX
+   ============================================================ */
+
+QGroupBox {
+    border: 1px solid #00ff41;
+    border-radius: 10px;
+    margin-top: 10px;
+    padding-top: 10px;
+    font-weight: bold;
+    font-family: "Courier New", monospace;
+}
+
+QGroupBox::title {
+    subcontrol-origin: margin;
+    left: 10px;
+    padding: 0 5px 0 5px;
+    color: #00ff41;
+}
+
+/* ============================================================
+   LABEL
+   ============================================================ */
+
+QLabel {
+    color: #00ff41;
+    font-family: "Courier New", monospace;
+}
+
+.section_title {
+    color: #00ff41;
+    font-size: 16px;
+    font-weight: bold;
+    margin-top: 10px;
+}
+
+#status {
+    color: #00ff41;
+    font-size: 13px;
+}
+
+/* ============================================================
+   SPIN BOX
+   ============================================================ */
+
+QSpinBox {
+    background-color: #0d0d0d;
+    color: #00ff41;
+    border: 1px solid #003b00;
+    border-radius: 8px;
+    padding: 5px;
+    font-family: "Courier New", monospace;
+}
+
+QSpinBox:focus {
+    border-color: #00ff41;
+}
+
+QSpinBox::up-button, QSpinBox::down-button {
+    background-color: #0d0d0d;
+    border: 1px solid #003b00;
+    border-radius: 4px;
+}
+
+QSpinBox::up-button:hover, QSpinBox::down-button:hover {
+    background-color: #003b00;
+}
+
+/* ============================================================
+   RADIO BUTTON
+   ============================================================ */
+
+QRadioButton {
+    color: #00ff41;
+    font-family: "Courier New", monospace;
+}
+
+QRadioButton::indicator {
+    width: 16px;
+    height: 16px;
+    border: 1px solid #00ff41;
+    border-radius: 8px;
+    background-color: #0d0d0d;
+}
+
+QRadioButton::indicator:checked {
+    background-color: #00ff41;
+}
+
+/* ============================================================
+   SCROLL BAR
+   ============================================================ */
+
+QScrollBar:vertical {
+    background-color: #0a0a0a;
+    width: 12px;
+    border: 1px solid #003b00;
+    border-radius: 6px;
+}
+
+QScrollBar::handle:vertical {
+    background-color: #00ff41;
+    border-radius: 6px;
+    min-height: 20px;
+}
+
+QScrollBar::handle:vertical:hover {
+    background-color: #00cc33;
+}
+
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+    background: none;
+}
+
+QScrollBar:horizontal {
+    background-color: #0a0a0a;
+    height: 12px;
+    border: 1px solid #003b00;
+    border-radius: 6px;
+}
+
+QScrollBar::handle:horizontal {
+    background-color: #00ff41;
+    border-radius: 6px;
+    min-width: 20px;
+}
+
+/* ============================================================
+   MESSAGE BOX
+   ============================================================ */
+
+QMessageBox {
+    background-color: #0a0a0a;
+    color: #00ff41;
+}
+
+QMessageBox QPushButton {
+    background-color: #0d0d0d;
+    color: #00ff41;
+    border: 1px solid #00ff41;
+    border-radius: 8px;
+    padding: 8px 16px;
+    font-family: "Courier New", monospace;
+}
+
+QMessageBox QPushButton:hover {
+    background-color: #003b00;
+}
+
+QMessageBox QLabel {
+    color: #00ff41;
+    font-family: "Courier New", monospace;
+}
+
+/* ============================================================
+   RUBRICA - ADDRESS BOOK VIEW
+   ============================================================ */
+
+#contact_list {
+    background-color: #000000;
+    color: #00ff41;
+    border: 1px solid #00ff41;
+    border-radius: 10px;
+    padding: 5px;
+    font-family: "Courier New", "Consolas", "Monaco", monospace;
+    font-size: 11px;
+    alternate-background-color: #0a1a0a;
+}
+
+#contact_list::item {
+    padding: 6px 8px;
+    border-bottom: 1px solid #1a3a1a;
+    color: #00ff41;
+    background-color: #000000;
+}
+
+#contact_list::item:hover {
+    background-color: #0a2a0a;
+    color: #ffffff;
+}
+
+#contact_list::item:selected {
+    background-color: #00ff41;
+    color: #000000;
+    font-weight: bold;
+}
+
+#contact_list::item:alternate {
+    background-color: #0a1a0a;
+    color: #00dd33;
+}
+
+#contact_list::item:alternate:selected {
+    background-color: #00ff41;
+    color: #000000;
+    font-weight: bold;
+}
+
+#detail_label {
+    background-color: #000000;
+    color: #00ff41;
+    border: 1px solid #00ff41;
+    border-radius: 10px;
+    padding: 15px;
+    font-family: "Courier New", "Consolas", "Monaco", monospace;
+    font-size: 12px;
+    line-height: 1.6;
+}
+
+#detail_label b {
+    color: #ffffff;
+    font-weight: bold;
+}
+
+#detail_label hr {
+    border: 1px solid #003b00;
+}
+
+#count_label {
+    color: #00ff41;
+    font-size: 12px;
+    font-family: "Courier New", monospace;
+    font-weight: bold;
+}

@@ -1,0 +1,11 @@
+{
+  "name": "mew",
+  "network": "mainnet",
+  "crypto": "XRP",
+  "address": "rBKbetm51vuQQfg4Yo8fvweRya7gedcr9J",
+  "seed": "sEdSv8R33vAWsxTrcreruCWJ7ZYs8DY",
+  "private_key": "2d2bb3b3ae2012af879dfde7a8190d465f50beb56a207ca37e8871c91a8150b4",
+  "mnemonic": null,
+  "file": "wallets/mew.json",
+  "created_at": "2026-07-27T19:23:21.930991"
+}

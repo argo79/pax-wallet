@@ -1,0 +1,538 @@
+/* ============================================================
+   PAX WALLET - PASTEL SOFT STYLE
+   Colori pastello tenui ma leggibili
+   ============================================================ */
+
+/* ============================================================
+   GENERALE - SFONDO PASTELLO DOLCE
+   ============================================================ */
+
+QWidget {
+    background-color: #f8f4f0;
+    color: #4a3f3a;
+    font-family: "Segoe UI", "Helvetica Neue", "Arial", sans-serif;
+}
+
+/* ============================================================
+   SIDEBAR
+   ============================================================ */
+
+#sidebar {
+    background-color: #fef8f5;
+    border-right: 1px solid #e8ddd0;
+}
+
+#logo {
+    color: #d4a88c;
+    font-size: 18px;
+    font-weight: 600;
+    padding: 10px 0;
+    letter-spacing: 0.5px;
+}
+
+#wallet_info {
+    background-color: #fcf5ef;
+    border: 1px solid #e8ddd0;
+    border-radius: 14px;
+    padding: 12px;
+}
+
+#wallet_name {
+    color: #5a4f4a;
+    font-size: 12px;
+    font-weight: 500;
+}
+
+#balance {
+    color: #d4a88c;
+    font-size: 16px;
+    font-weight: 600;
+}
+
+#nav_button {
+    background-color: transparent;
+    color: #8a7a6a;
+    border: none;
+    padding: 10px 15px;
+    text-align: left;
+    font-size: 13px;
+    border-radius: 12px;
+    font-weight: 500;
+}
+
+#nav_button:hover {
+    background-color: #f0e8e0;
+    color: #5a4f4a;
+}
+
+#nav_button:checked {
+    background-color: #d4a88c;
+    color: #fef8f5;
+    font-weight: 600;
+}
+
+#version {
+    color: #c0b0a0;
+    font-size: 10px;
+}
+
+/* ============================================================
+   CONTENUTO PRINCIPALE
+   ============================================================ */
+
+#content_stack {
+    background-color: #f8f4f0;
+}
+
+.view_title {
+    color: #4a3f3a;
+    font-size: 22px;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+}
+
+#welcome_label {
+    color: #8a7a6a;
+    font-size: 13px;
+    padding: 8px 0;
+    border-bottom: 1px solid #e8ddd0;
+    margin-bottom: 10px;
+}
+
+/* ============================================================
+   UNLOCK WINDOW
+   ============================================================ */
+
+#unlock_logo {
+    color: #d4a88c;
+    font-size: 36px;
+    font-weight: 600;
+}
+
+#unlock_desc {
+    color: #8a7a6a;
+    font-size: 14px;
+}
+
+#error {
+    color: #d48c8c;
+    font-size: 13px;
+}
+
+/* ============================================================
+   BALANCE CARD
+   ============================================================ */
+
+#balance_card {
+    background-color: #fcf5ef;
+    border: 1px solid #e8ddd0;
+    border-radius: 18px;
+    padding: 30px;
+}
+
+#big_balance {
+    color: #4a3f3a;
+    font-size: 32px;
+    font-weight: 600;
+}
+
+#usd_balance {
+    color: #b0a090;
+    font-size: 16px;
+}
+
+/* ============================================================
+   LISTE - STORICO, WALLET, RETICULUM OUTPUT
+   ============================================================ */
+
+#tx_list, #wallet_list, #output_list {
+    background-color: #fcf5ef;
+    border: 1px solid #e8ddd0;
+    border-radius: 14px;
+    color: #4a3f3a;
+    padding: 5px;
+    font-family: "Segoe UI", "Helvetica Neue", sans-serif;
+    font-size: 12px;
+}
+
+#tx_list::item, #wallet_list::item, #output_list::item {
+    padding: 6px 12px;
+    border-radius: 8px;
+}
+
+#tx_list::item:hover, #wallet_list::item:hover, #output_list::item:hover {
+    background-color: #f0e8e0;
+}
+
+#tx_list::item:selected, #wallet_list::item:selected, #output_list::item:selected {
+    background-color: #d4a88c;
+    color: #fef8f5;
+}
+
+/* ============================================================
+   DETAIL PANEL (per ListViewWithDetail)
+   ============================================================ */
+
+#detail_panel {
+    background-color: #fcf5ef;
+    border: 1px solid #e8ddd0;
+    border-radius: 14px;
+    padding: 12px;
+}
+
+#detail_title {
+    color: #d4a88c;
+    font-weight: 600;
+    font-size: 13px;
+}
+
+#detail_text {
+    background-color: #fef8f5;
+    color: #4a3f3a;
+    border: 1px solid #e8ddd0;
+    border-radius: 10px;
+    padding: 10px;
+    font-family: "Segoe UI", "Helvetica Neue", sans-serif;
+    font-size: 12px;
+}
+
+/* ============================================================
+   BOTTONI
+   ============================================================ */
+
+QPushButton {
+    background-color: #d4a88c;
+    color: #fef8f5;
+    border: none;
+    border-radius: 12px;
+    padding: 10px 20px;
+    font-size: 13px;
+    font-weight: 500;
+}
+
+QPushButton:hover {
+    background-color: #c8987c;
+}
+
+QPushButton:pressed {
+    background-color: #b8886c;
+}
+
+QPushButton:disabled {
+    background-color: #d8d0c8;
+    color: #b0a090;
+}
+
+#quick_action {
+    background-color: #fcf5ef;
+    color: #5a4f4a;
+    border: 1px solid #e8ddd0;
+    border-radius: 14px;
+    padding: 15px;
+    font-size: 14px;
+    font-weight: 500;
+}
+
+#quick_action:hover {
+    background-color: #f0e8e0;
+    border-color: #d4a88c;
+}
+
+#send_btn {
+    background-color: #d4a88c;
+    color: #fef8f5;
+    font-weight: 600;
+    padding: 14px;
+    border: none;
+    border-radius: 14px;
+    font-size: 16px;
+}
+
+#send_btn:hover {
+    background-color: #c8987c;
+}
+
+#send_btn:disabled {
+    background-color: #d8d0c8;
+    color: #b0a090;
+}
+
+#exit_btn {
+    background-color: #f8ece8;
+    color: #c0887a;
+    border: 1px solid #e8d0c8;
+    border-radius: 12px;
+    padding: 8px 16px;
+    font-size: 13px;
+    font-weight: 500;
+}
+
+#exit_btn:hover {
+    background-color: #f0dcd4;
+    color: #b0786a;
+}
+
+#exit_btn:pressed {
+    background-color: #e8ccc0;
+    border-color: #d4a88c;
+}
+
+/* ============================================================
+   INPUT
+   ============================================================ */
+
+QLineEdit {
+    background-color: #fcf5ef;
+    color: #4a3f3a;
+    border: 1px solid #e8ddd0;
+    border-radius: 12px;
+    padding: 10px 14px;
+    font-size: 13px;
+}
+
+QLineEdit:focus {
+    border-color: #d4a88c;
+    background-color: #ffffff;
+}
+
+QLineEdit::placeholder {
+    color: #c0b0a0;
+}
+
+/* ============================================================
+   GROUP BOX
+   ============================================================ */
+
+QGroupBox {
+    border: 1px solid #e8ddd0;
+    border-radius: 14px;
+    margin-top: 10px;
+    padding-top: 10px;
+    font-weight: 600;
+    color: #4a3f3a;
+}
+
+QGroupBox::title {
+    subcontrol-origin: margin;
+    left: 10px;
+    padding: 0 5px;
+    color: #d4a88c;
+}
+
+/* ============================================================
+   LABEL
+   ============================================================ */
+
+QLabel {
+    color: #4a3f3a;
+    font-family: "Segoe UI", "Helvetica Neue", sans-serif;
+}
+
+.section_title {
+    color: #4a3f3a;
+    font-size: 16px;
+    font-weight: 600;
+    margin-top: 10px;
+}
+
+#status {
+    color: #4a3f3a;
+    font-size: 13px;
+}
+
+/* ============================================================
+   SPIN BOX
+   ============================================================ */
+
+QSpinBox {
+    background-color: #fcf5ef;
+    color: #4a3f3a;
+    border: 1px solid #e8ddd0;
+    border-radius: 12px;
+    padding: 5px 10px;
+}
+
+QSpinBox:focus {
+    border-color: #d4a88c;
+}
+
+QSpinBox::up-button, QSpinBox::down-button {
+    background-color: #fcf5ef;
+    border: 1px solid #e8ddd0;
+    border-radius: 6px;
+}
+
+QSpinBox::up-button:hover, QSpinBox::down-button:hover {
+    background-color: #f0e8e0;
+}
+
+/* ============================================================
+   RADIO BUTTON
+   ============================================================ */
+
+QRadioButton {
+    color: #4a3f3a;
+    font-family: "Segoe UI", "Helvetica Neue", sans-serif;
+}
+
+QRadioButton::indicator {
+    width: 18px;
+    height: 18px;
+    border: 2px solid #b0a090;
+    border-radius: 9px;
+    background-color: #fcf5ef;
+}
+
+QRadioButton::indicator:checked {
+    background-color: #d4a88c;
+    border-color: #d4a88c;
+}
+
+/* ============================================================
+   SCROLL BAR
+   ============================================================ */
+
+QScrollBar:vertical {
+    background-color: #f0ece8;
+    width: 8px;
+    border-radius: 4px;
+}
+
+QScrollBar::handle:vertical {
+    background-color: #d8d0c8;
+    border-radius: 4px;
+    min-height: 20px;
+}
+
+QScrollBar::handle:vertical:hover {
+    background-color: #c8c0b8;
+}
+
+QScrollBar:horizontal {
+    background-color: #f0ece8;
+    height: 8px;
+    border-radius: 4px;
+}
+
+QScrollBar::handle:horizontal {
+    background-color: #d8d0c8;
+    border-radius: 4px;
+    min-width: 20px;
+}
+
+QScrollBar::handle:horizontal:hover {
+    background-color: #c8c0b8;
+}
+
+/* ============================================================
+   MESSAGE BOX
+   ============================================================ */
+
+QMessageBox {
+    background-color: #fcf5ef;
+    color: #4a3f3a;
+}
+
+QMessageBox QPushButton {
+    background-color: #d4a88c;
+    color: #fef8f5;
+    border: none;
+    border-radius: 12px;
+    padding: 8px 16px;
+    font-weight: 500;
+    font-family: "Segoe UI", "Helvetica Neue", sans-serif;
+}
+
+QMessageBox QPushButton:hover {
+    background-color: #c8987c;
+}
+
+QMessageBox QLabel {
+    color: #4a3f3a;
+    font-family: "Segoe UI", "Helvetica Neue", sans-serif;
+}
+
+/* ============================================================
+   SPLITTER
+   ============================================================ */
+
+QSplitter::handle {
+    background-color: #e8ddd0;
+    width: 2px;
+}
+
+/* ============================================================
+   SCROLL AREA
+   ============================================================ */
+
+QScrollArea {
+    background-color: transparent;
+    border: none;
+}
+
+/* ============================================================
+   RUBRICA - ADDRESS BOOK VIEW - PASTEL STYLE
+   ============================================================ */
+
+#contact_list {
+    background-color: #fcf5ef;
+    color: #4a3f3a;
+    border: 1px solid #e8ddd0;
+    border-radius: 14px;
+    padding: 5px;
+    font-family: "Courier New", "Consolas", "Monaco", monospace !important;
+    font-size: 11px;
+    alternate-background-color: #fef8f5;
+}
+
+#contact_list::item {
+    padding: 6px 12px;
+    border-bottom: 1px solid #f0e8e0;
+    color: #4a3f3a;
+    background-color: #fcf5ef;
+    font-family: "Courier New", "Consolas", "Monaco", monospace !important;
+}
+
+#contact_list::item:hover {
+    background-color: #f0e8e0;
+    color: #5a4f4a;
+}
+
+#contact_list::item:selected {
+    background-color: #d4a88c;
+    color: #fef8f5;
+    font-weight: 600;
+}
+
+#contact_list::item:alternate {
+    background-color: #fef8f5;
+    color: #4a3f3a;
+    font-family: "Courier New", "Consolas", "Monaco", monospace !important;
+}
+
+#contact_list::item:alternate:selected {
+    background-color: #d4a88c;
+    color: #fef8f5;
+    font-weight: 600;
+}
+
+#detail_label {
+    background-color: #fcf5ef;
+    color: #4a3f3a;
+    border: 1px solid #e8ddd0;
+    border-radius: 14px;
+    padding: 15px;
+    font-family: "Courier New", "Consolas", "Monaco", monospace !important;
+    font-size: 12px;
+}
+
+#detail_label b {
+    color: #d4a88c;
+    font-weight: 600;
+}
+
+#count_label {
+    color: #4a3f3a;
+    font-size: 12px;
+    font-weight: 500;
+}
